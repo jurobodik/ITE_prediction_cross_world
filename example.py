@@ -2,7 +2,7 @@
 This script serves as a demo example to try out and possibly easy-to-modify for your dataset
 First, we generate synthetic data using the `data_synthetic` function. It simulates realistic treatment-outcome dependencies using various copulas and marginal noise distributions.
 Then, we apply the `D_rho_intervals` function to estimate prediction intervals for Individual Treatment Effects (ITE).
-The `D_rho_intervals` function can be found in the `D_rho_intervals.py` file
+The `D_rho_intervals` function can be found in the `D_rho_intervals_function.py` file
 
 Function source: source(D_rho_intervals_function.py)
 
