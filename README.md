@@ -11,6 +11,8 @@ Assuming values or bounds on ρ(x) allows us to refine the uncertainty quantific
 
 ![image](https://github.com/user-attachments/assets/8597020a-61f6-4fbc-97f5-46dfe4fdadd1)
 
+![image](https://github.com/user-attachments/assets/ed7e234e-bc1f-46cd-a66c-2b742987f8e2)
+
 ---
 ---
 
