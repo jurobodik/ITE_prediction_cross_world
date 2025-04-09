@@ -50,6 +50,8 @@ result <- D_rho_intervals(X, Y, treatment, new_points, rho,
 print(result$CATE)
 print(result$lower)
 print(result$upper)
+```
+We also implemented a translation of D_rho_intervals into python:
 
 ```python
 from Main_function import D_rho_intervals
