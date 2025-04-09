@@ -1,7 +1,4 @@
 ################################################################################
-# D_rho_intervals.R
-#
-# Title: ITE Prediction Intervals under Cross-World Assumptions 
 # Author: jurajbodik.com
 # Description:
 #   This script provides an implementation of prediction intervals 
