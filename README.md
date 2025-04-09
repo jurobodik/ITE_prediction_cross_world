@@ -8,6 +8,7 @@
 We develop methods for constructing **valid and informative prediction intervals for individual treatment effects (ITE)** under assumptions on the **cross-world correlation parameter ρ(x) = corr(Y(1), Y(0) | X = x)**.
 
 Assuming values or bounds on ρ(x) allows us to refine the uncertainty quantification around ITE estimates—balancing informativeness and validity.
+
 ![image](https://github.com/user-attachments/assets/8597020a-61f6-4fbc-97f5-46dfe4fdadd1)
 
 ---
