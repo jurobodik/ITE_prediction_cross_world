@@ -30,7 +30,7 @@ Supported options:
 ## 🧪 Example Usage
 
 ```r
-source("Main_function.R")
+source("D_rho_intervals_function.R")
 
 set.seed(0)
 n <- 1000; d <- 5; rho <- 0.5
@@ -54,7 +54,7 @@ print(result$upper)
 We also implemented a translation of D_rho_intervals into python:
 
 ```python
-from Main_function import D_rho_intervals
+from D_rho_intervals_function import D_rho_intervals
 import numpy as np
 
 np.random.seed(0)
