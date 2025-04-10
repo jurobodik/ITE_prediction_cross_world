@@ -3,7 +3,7 @@
 set.seed(123)
 rho_vals <- c(1, 0.5, 0, -0.5, -1)
 d = 1
-n = 1000
+n = 2000
 n_iter = 50
 data_generation = 'Synthetic Gaussian'
 
