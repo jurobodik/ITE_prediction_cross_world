@@ -44,7 +44,9 @@ Y <- ifelse(treatment == 1, Y1, Y0)
 new_points <- as.data.frame(matrix(rnorm(10 * d), ncol = d)) #at what points do you want to estimate ITE?
 
 result <- D_rho_intervals(X, Y, treatment, new_points, rho,
-                          conformal = "CQR", weighted_conformal = FALSE,
+                          desired_coverage = 0.9, 
+                          conformal = "CQR",
+                          weighted_conformal = FALSE,
                           add_confidence_intervals = TRUE)
 
 print(result$CATE)
@@ -73,6 +75,7 @@ Y = np.where(treatment == 1, Y1, Y0)
 new_points = np.random.randn(10, d) #at what points do you want to estimate ITE?
 
 result = D_rho_intervals(X, Y, treatment, new_points, rho=rho,
+                         desired_coverage = 0.9, 
                          conformal="CQR", weighted_conformal=False,
                          add_confidence_intervals=True)
 
