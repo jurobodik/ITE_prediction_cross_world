@@ -27,7 +27,7 @@ Supported options:
 
 ---
 
-## 🧪 Example Usage
+## 🧪 Example Usage (R or Python)
 
 ```r
 source("D_rho_intervals_function.R")
