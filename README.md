@@ -41,7 +41,7 @@ Y0 <- X[,1] + epsilons[,1]
 Y1 <- X[,1] + 1 + X[,2]^2 + epsilons[,2]
 Y <- ifelse(treatment == 1, Y1, Y0)
 
-new_points <- as.data.frame(matrix(rnorm(10 * d), ncol = d))
+new_points <- as.data.frame(matrix(rnorm(10 * d), ncol = d)) #at what points do you want to estimate ITE?
 
 result <- D_rho_intervals(X, Y, treatment, new_points, rho,
                           conformal = "CQR", weighted_conformal = FALSE,
@@ -70,7 +70,7 @@ Y0 = X[:, 0] + eps[:, 0]
 Y1 = X[:, 0] + 1 + X[:, 1]**2 + eps[:, 1]
 Y = np.where(treatment == 1, Y1, Y0)
 
-new_points = np.random.randn(10, d)
+new_points = np.random.randn(10, d) #at what points do you want to estimate ITE?
 
 result = D_rho_intervals(X, Y, treatment, new_points, rho=rho,
                          conformal="CQR", weighted_conformal=False,
