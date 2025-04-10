@@ -5,7 +5,7 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.1234567.svg)](https://doi.org/10.5281/zenodo.1234567)
 (licence TODO)
 
-We develop methods for constructing **valid and informative prediction intervals for individual treatment effects (ITE)** under assumptions on the **cross-world correlation parameter ρ(x) = corr(Y(1), Y(0) | X = x)**.
+We develop methods for constructing **valid and informative prediction intervals for individual treatment effects (ITE)** for new units not within the study, under assumptions on the **cross-world correlation parameter ρ(x) = corr(Y(1), Y(0) | X = x)**.
 
 Assuming values or bounds on ρ(x) allows us to refine the uncertainty quantification around ITE estimates—balancing informativeness and validity.
 
