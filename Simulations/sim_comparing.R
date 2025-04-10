@@ -1,5 +1,6 @@
 #Simulations about the coverage of the D_rho intervals in comparison with other approaches such as Lei et al.
 
+set.seed(123)
 rho_vals <- c(1, 0.5, 0, -0.5, -1)
 d = 1
 n = 1000
