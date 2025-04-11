@@ -147,7 +147,7 @@ data_synthetic <- function(n = 1000,
                            sigma_2 = 4, 
                            constant_propensity = FALSE, 
                            copula_type = "gaussian", #choices: "gaussian", "clayton", "t", "gumbel"
-                           marginal = "gaussian"){ #choices: "gaussian", "laplace", "t", "laplace", "chisq"
+                           marginal = "gaussian"){ #choices: "gaussian", "laplace", "t", "chisq"
   # generate random 1D and 2D functions
   random_function_1d <- function(freq = 0.1) {
     s = seq(-10, 10, length.out = 1001)
