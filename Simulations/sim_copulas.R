@@ -8,7 +8,7 @@ copula_marginal_combos <- list(
 )
 
 rhos <- c(-0.75, -0.5, 0.25, 0, 0.25, 0.5, 0.75)
-dimension_of_X <- c(10)
+dimension_of_X <- c(1, 15)
 reps <- 50
 
 
@@ -83,6 +83,91 @@ for (combo in copula_marginal_combos) {
 }
 
 results_all <- bind_rows(results, results_with_CI)
+
+#write.csv(results_all, "results_copula.csv", row.names = FALSE)
+#results_all <- read.csv("results_copula.csv")
+
+###################### Plotting ####################
+generate_final_Drho_overlay_plot <- function(results_all) {
+  library(ggplot2)
+  library(dplyr)
+  
+  # Set Method
+  results_all <- results_all %>%
+    mutate(
+      Method = ifelse(ci, "D_rho + CI", "D_rho"),
+      Method = factor(Method, levels = c("D_rho", "D_rho + CI"))
+    )
+  
+  # Full copula and marginal names
+  copula_names <- c(gaussian = "Gaussian", t = "Student-t", clayton = "Clayton", gumbel = "Gumbel")
+  marginal_names <- c(gaussian = "Gaussian", t = "Student-t", chisq = "Chi-squared", laplace = "Laplace")
+  
+  results_all <- results_all %>%
+    mutate(
+      copula_full = copula_names[copula],
+      marginal_full = marginal_names[marginal],
+      col_label = paste0("Copula: ", copula_full, "\nMarginal: ", marginal_full)
+    )
+  
+  # Fix order of columns
+  desired_order <- c(
+    "Copula: Gaussian\nMarginal: Gaussian",
+    "Copula: Student-t\nMarginal: Student-t",
+    "Copula: Clayton\nMarginal: Chi-squared",
+    "Copula: Gumbel\nMarginal: Laplace"
+  )
+  results_all$col_label <- factor(results_all$col_label, levels = desired_order)
+  
+  # rho facet (parsed math labels)
+  results_all <- results_all %>%
+    mutate(rho_lab = factor(paste0("rho==", rho), levels = paste0("rho==", sort(unique(rho)))))
+  
+  # Labels and colors
+  method_labels <- c(
+    "D_rho" = expression(D[rho]),
+    "D_rho + CI" = expression(D[rho]*" + CI")
+  )
+  custom_colors <- c(
+    "D_rho" = "#1f77b4",
+    "D_rho + CI" = "#d62728"
+  )
+  
+  # Plot
+  p <- ggplot(results_all, aes(x = coverage, y = Method, fill = Method)) +
+    geom_boxplot(
+      position = position_dodge(width = 0.6),
+      width = 0.5,
+      outlier.size = 0.8,
+      color = "black",
+      linewidth = 0.4
+    ) +
+    facet_grid(rows = vars(rho_lab), cols = vars(col_label),
+               labeller = labeller(rho_lab = label_parsed, col_label = label_value)) +
+    geom_vline(xintercept = 0.9, color = "black", size = 1) +
+    scale_x_continuous(limits = c(0.8, 1.0), breaks = c(0.8, 0.9)) +
+    scale_fill_manual(values = custom_colors) +
+    scale_y_discrete(labels = method_labels) +
+    theme_minimal(base_size = 12) +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      strip.text.x = element_text(size = 10, face = "bold"),
+      strip.text.y = element_text(size = 10),
+      legend.position = "none",
+      axis.title = element_blank()
+    ) +
+    labs(title = expression("Coverage of " * D[rho] * " and " * D[rho] * " + CI across copula-marginal combinations"))
+  
+  print(p)
+  return(p)
+}
+
+
+
+
+
+final_plot <- generate_final_Drho_overlay_plot(results_all)
+ggsave("sim_copula_d_1.pdf", plot = final_plot, width = 7.5, height = 9.5, dpi = 500)
 
 
 
