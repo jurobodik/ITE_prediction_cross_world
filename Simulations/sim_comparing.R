@@ -265,3 +265,226 @@ final_plot <- (title_cov | title_wid) / (left_col | right_col) +
 
 # Display
 print(final_plot)
+
+
+
+
+
+###########################Here is a plot for the overlaying nice boxplot:
+generate_plots_all_tohether_final = function(all_results){
+rho_vals <- c(-1, -0.5, 0, 0.5, 1)
+
+# Set factor levels for methods
+all_results$Method <- factor(all_results$Method,
+                             levels = c("Lei_exact", "Lei_inexact", "DR", "CMC", "D_rho", "D_rho_0.25", "D_rho_with_CI"))
+
+# Labels
+method_labels <- c(
+  "D_rho"        = expression(D[rho]),
+  "D_rho_with_CI" = expression(D[rho]*" + CI"),
+  "D_rho_0.25"   = expression(D[rho-0.25]),
+  "CMC"          = "CMC",
+  "DR"           = "DR",
+  "Lei_inexact"  = "Lei (inexact)",
+  "Lei_exact"    = "Lei (naive)"
+)
+
+rho_labels <- list(
+  `1` = expression(rho == 1),
+  `0.5` = expression(rho == 0.5),
+  `0` = expression(rho == 0),
+  `-0.5` = expression(rho == -0.5),
+  `-1` = expression(rho == -1)
+)
+
+custom_colors <- c(
+  "D_rho" = "#1f77b4",
+  "D_rho_with_CI" = "#d62728",
+  "D_rho_0.25" = "#2ca02c",
+  "CMC" = "gray40",
+  "DR" = "gray60",
+  "Lei_inexact" = "gray80",
+  "Lei_exact" = "gray99"
+)
+
+
+
+generate_plots_overlay <- function(rho_val, hide_x_axis = TRUE) {
+  df_rho <- filter(all_results, Rho == paste0("rho = ", rho_val))
+  
+  show_legend <- rho_val == 0
+  
+  method_levels <- levels(df_rho$Method)
+  y_indices <- seq_along(method_levels)
+  
+  # Underpaint every second method row (horizontal bands)
+  stripes <- lapply(y_indices[y_indices %% 2 == 0], function(i) {
+    annotate("rect",
+             xmin = -Inf, xmax = Inf,
+             ymin = i - 0.5, ymax = i + 0.5,
+             fill = "lightblue", alpha = 0.6)  # ← more visible and blue
+  })
+  
+  # Draw d = 15 behind, d = 1 on top
+  df_rho$pattern <- factor(df_rho$d, levels = c(15, 1))
+  
+  pattern_vals <- c(`1` = "circle", `15` = "none")
+  
+  # Coverage plot
+  coverage_plot <- ggplot(df_rho, aes(
+    x = Coverage,
+    y = Method,
+    fill = Method,
+    pattern = pattern
+  )) +
+    stripes +
+    ggpattern::geom_boxplot_pattern(
+      position = position_dodge(width = 0.6),
+      width = 0.5, outlier.size = 0.8,
+      color = "black", linewidth = 0.4,
+      pattern_fill = "gray20",       # darker dots
+      pattern_density = 0.7,         # larger dot size
+      pattern_spacing = 0.025,       # closer together
+      pattern_key_scale_factor = 0.5
+    ) +
+    geom_vline(xintercept = 0.9, color = "black", size = 1) +
+    xlim(0.67, 1) +
+    scale_y_discrete(labels = method_labels) +
+    scale_fill_manual(values = custom_colors, guide = "none") +
+    scale_pattern_manual(
+      values = pattern_vals,
+      breaks = c("1", "15"),
+      labels = c("1" = "d = 1", "15" = "d = 15"),
+      name = if (show_legend) "d" else NULL
+    ) +
+    theme_minimal(base_size = 11) +
+    guides() +
+    theme(
+      legend.position = if (show_legend) "right" else "none",
+      axis.title = element_blank(),
+      plot.title = element_blank()
+    )
+  
+  # Width plot
+  width_plot <- ggplot(df_rho, aes(
+    x = Width,
+    y = Method,
+    fill = Method,
+    pattern = pattern
+  )) +
+    stripes +
+    ggpattern::geom_boxplot_pattern(
+      position = position_dodge(width = 0.6),
+      width = 0.5, outlier.size = 0.8,
+      color = "black", linewidth = 0.4,
+      pattern_fill = "gray20",
+      pattern_density = 0.7,
+      pattern_spacing = 0.025,
+      pattern_key_scale_factor = 0.5
+    ) +
+    xlim(0, 15) +
+    scale_y_discrete(labels = method_labels) +
+    scale_fill_manual(values = custom_colors, guide = "none") +
+    scale_pattern_manual(
+      values = pattern_vals,
+      breaks = c("1", "15"),
+      labels = c("1" = "d = 1", "15" = "d = 15"),
+      name = NULL
+    ) +
+    theme_minimal(base_size = 11) +
+    guides() +
+    theme(
+      legend.position = "none",
+      axis.title = element_blank(),
+      axis.text.y = element_blank(),
+      axis.ticks.y = element_blank(),
+      plot.title = element_blank()
+    )
+  
+  if (hide_x_axis) {
+    coverage_plot <- coverage_plot +
+      theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+    width_plot <- width_plot +
+      theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+  }
+  
+  list(coverage = coverage_plot, width = width_plot)
+}
+
+
+# Create plots per rho
+plot_pairs <- lapply(seq_along(rho_vals), function(i) {
+  generate_plots_overlay(rho_vals[i], hide_x_axis = i != length(rho_vals))
+})
+
+coverage_plots <- lapply(plot_pairs, `[[`, "coverage")
+width_plots <- lapply(plot_pairs, `[[`, "width")
+
+# Left-side rotated rho labels
+rho_labels_grobs <- lapply(rho_vals, function(rho_val) {
+  label_expr <- rho_labels[[as.character(rho_val)]]
+  ggplot() + 
+    annotate("text", x = 1, y = 1, label = label_expr, parse = TRUE, size = 5) +
+    theme_void()
+})
+
+
+# Row-wise layout
+rows_with_labels <- Map(function(lbl, cov, wid) {
+  lbl | cov | wid
+}, lbl = rho_labels_grobs, cov = coverage_plots, wid = width_plots)
+
+title_rho <- ggplot() + theme_void()
+title_cov <- ggplot() +
+  annotate("text", x = 1, y = 1, label = "Coverage", size = 5, fontface = "bold") +
+  theme_void()
+title_wid <- ggplot() +
+  annotate("text", x = 1, y = 1, label = "Width", size = 5, fontface = "bold") +
+  theme_void()
+
+# Header row
+header <- title_rho | title_cov | title_wid
+
+# Set consistent row height for each plot row
+row_height <- 1
+row_heights <- rep(row_height, length(rows_with_labels))
+header_height <- 0.06
+
+# Combine all rows with rho label | coverage | width
+full_plot <- wrap_plots(
+  list(header, rows_with_labels[[1]], rows_with_labels[[2]],
+       rows_with_labels[[3]], rows_with_labels[[4]], rows_with_labels[[5]]),
+  ncol = 1
+)
+
+# Create a patchwork design with 6 rows (header + 5 rhos) and 3 columns
+layout_matrix <- area(
+  t = c(1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6),
+  l = c(1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3),
+  b = c(1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6),
+  r = c(1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3)
+)
+
+# Flatten each row: get lbl, coverage, and width plots
+rows_split <- lapply(seq_along(rows_with_labels), function(i) {
+  list(rho_labels_grobs[[i]], coverage_plots[[i]], width_plots[[i]])
+})
+
+# Combine header and rows
+plots_flat <- c(
+  list(title_rho, title_cov, title_wid),
+  do.call(c, rows_split)
+)
+
+
+# Now assemble with layout
+final_plot <- wrap_plots(plots_flat, design = layout_matrix) +
+  plot_layout(widths = c(1.5, 5, 5), heights = c(0.3, rep(1, 5)))
+
+
+# Display
+print(final_plot)
+}
+
+
+
