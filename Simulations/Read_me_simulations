@@ -1,11 +1,10 @@
-**Welcome to the simulations for**  
-*“Cross-World Assumptions and Their Role in Refining Prediction Intervals for Individual Treatment Effects”*
+Welcome to the simulations for “Cross-World Assumptions and Their Role in Refining Prediction Intervals for Individual Treatment Effects”
 
 If you’re here to reproduce the numerical experiments from the paper, you’re in the right place.
 
 ---
 
-**Step 1: Run `helpers.R`**
+Step 1: Run `helpers.R`
 
 This is the trickiest part. The script includes:
 
@@ -15,11 +14,11 @@ This is the trickiest part. The script includes:
 - A wrapper to load the IHDP dataset.
   - You’ll also need to set the path to where the `.csv` file is located.
 
-⚠️ I’m not a Python expert, so I can’t guarantee this will run the same on your machine. If you get stuck, feel free to reach out: juraj.bodik [at] unil.ch
+I’m not a Python expert, so I can’t guarantee this will run the same on your machine. If you get stuck, feel free to reach out: juraj.bodik [at] unil.ch
 
 ---
 
-**Step 2: Run the simulations**
+Step 2: Run the simulations
 
 If `helpers.R` runs correctly, you’re all set! The rest is easy:
 
