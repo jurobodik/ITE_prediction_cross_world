@@ -1,0 +1,37 @@
+# Numerical Experiments for:  
+**"Cross-World Assumptions and Their Role in Refining Prediction Intervals for Individual Treatment Effects"**
+
+Hello and welcome!  
+This repository contains the code for reproducing the simulations and numerical experiments from our paper:  
+**_Cross-World Assumptions and Their Role in Refining Prediction Intervals for Individual Treatment Effects._**
+
+If you're here to run the experiments — you're in the right place.
+
+---
+
+## 🛠 Getting Started
+
+Start by sourcing the file `helpers.R`.  
+This is the trickiest part, as it includes a function `Jonkers_and_Alaa_wrappers_from_python()` that uses a Python virtual environment to run scripts from R.
+
+To be fully transparent: I can’t guarantee that it will run identically on your machine — I'm not primarily a Python person, so there might be quirks. That said, here's what you need to do:
+
+- **Set up the virtual environment**: Point it to the `cct-cmc.zip` folder (or the extracted directory) which contains the implementations from Alaa et al. and Jonkers et al.
+- **IHDP dataset**: The same file also includes a wrapper for uploading the IHDP dataset. You'll need to set the path to where the `.csv` file is located on your system.
+
+If you manage to get `helpers.R` working, you're in great shape! If not, feel free to reach out:  
+📧 juraj.bodik [at] unil.ch
+
+---
+
+## 📊 Simulations
+
+Once `helpers.R` is sourced correctly, the rest is straightforward:
+
+- `sim_comparing.R`: Simulations comparing various methods on both synthetic and IHDP datasets.
+- `sim_copulas.R`: Simulations studying how different copulas influence interval coverage.
+
+---
+
+Good luck! 
+
