@@ -1,37 +1,31 @@
-# Numerical Experiments for:  
-**"Cross-World Assumptions and Their Role in Refining Prediction Intervals for Individual Treatment Effects"**
+**Welcome to the simulations for**  
+*“Cross-World Assumptions and Their Role in Refining Prediction Intervals for Individual Treatment Effects”*
 
-Hello and welcome!  
-This repository contains the code for reproducing the simulations and numerical experiments from our paper:  
-**_Cross-World Assumptions and Their Role in Refining Prediction Intervals for Individual Treatment Effects._**
-
-If you're here to run the experiments — you're in the right place.
+If you’re here to reproduce the numerical experiments from the paper, you’re in the right place.
 
 ---
 
-## 🛠 Getting Started
+**Step 1: Run `helpers.R`**
 
-Start by sourcing the file `helpers.R`.  
-This is the trickiest part, as it includes a function `Jonkers_and_Alaa_wrappers_from_python()` that uses a Python virtual environment to run scripts from R.
+This is the trickiest part. The script includes:
 
-To be fully transparent: I can’t guarantee that it will run identically on your machine — I'm not primarily a Python person, so there might be quirks. That said, here's what you need to do:
+- A function `Jonkers_and_Alaa_wrappers_from_python()` that uses a Python virtual environment to run Python code from R.
+  - You’ll need to manually set the path to your virtual environment.
+  - That environment should include the codebase from `cct-cmc.zip`, which contains the implementations of Alaa et al. and Jonkers et al.
+- A wrapper to load the IHDP dataset.
+  - You’ll also need to set the path to where the `.csv` file is located.
 
-- **Set up the virtual environment**: Point it to the `cct-cmc.zip` folder (or the extracted directory) which contains the implementations from Alaa et al. and Jonkers et al.
-- **IHDP dataset**: The same file also includes a wrapper for uploading the IHDP dataset. You'll need to set the path to where the `.csv` file is located on your system.
-
-If you manage to get `helpers.R` working, you're in great shape! If not, feel free to reach out:  
-📧 juraj.bodik [at] unil.ch
-
----
-
-## 📊 Simulations
-
-Once `helpers.R` is sourced correctly, the rest is straightforward:
-
-- `sim_comparing.R`: Simulations comparing various methods on both synthetic and IHDP datasets.
-- `sim_copulas.R`: Simulations studying how different copulas influence interval coverage.
+⚠️ I’m not a Python expert, so I can’t guarantee this will run the same on your machine. If you get stuck, feel free to reach out: juraj.bodik [at] unil.ch
 
 ---
 
-Good luck! 
+**Step 2: Run the simulations**
 
+If `helpers.R` runs correctly, you’re all set! The rest is easy:
+
+- `sim_comparing.R` — runs simulations comparing different methods (both synthetic and IHDP)
+- `sim_copulas.R` — explores how different copulas affect coverage
+
+---
+
+Good luck and have fun!
