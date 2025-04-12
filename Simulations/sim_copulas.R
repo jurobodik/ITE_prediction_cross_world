@@ -86,7 +86,9 @@ results_all <- bind_rows(results, results_with_CI)
 
 #write.csv(results_all, "results_copula.csv", row.names = FALSE)
 #results_all <- read.csv("results_copula.csv")
+results_all = results_all[results_all$d==1,]
 
+                          
 ###################### Plotting ####################
 generate_final_Drho_overlay_plot <- function(results_all) {
   library(ggplot2)
