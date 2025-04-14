@@ -8,7 +8,7 @@ copula_marginal_combos <- list(
   list(copula = "frank",  marginal = "laplace")
 )
 
-rhos <- c(-0.75, -0.5, 0.25, 0, 0.25, 0.5, 0.75)
+rhos <- c(-0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75)
 dimension_of_X <- c(1)
 reps <- 50
 
