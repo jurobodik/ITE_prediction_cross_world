@@ -206,11 +206,7 @@ data_synthetic <- function(n = 1000,
   
   
   generate_errors <- function(n, rho, sigma_1, sigma_2, copula_type = "gaussian", marginal = "gaussian") {
-    library(copula)
-    
-    qlaplace <- function(p) {
-      ifelse(p < 0.5, log(2 * p), -log(2 * (1 - p)))
-    }
+    qlaplace <- function(p) { ifelse(p < 0.5, log(2 * p), -log(2 * (1 - p))) }
     
     transform_marginal <- function(u_vec, type) {
       switch(type,
