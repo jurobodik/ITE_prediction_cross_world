@@ -1,5 +1,6 @@
 #Simulations about the coverage of the D_rho intervals for different copula and marginal distributions of epsilon
 
+set.seeed(123)
 copula_marginal_combos <- list(
   list(copula = "gaussian", marginal = "gaussian"),
   list(copula = "t",        marginal = "t"),
