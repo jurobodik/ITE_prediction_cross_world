@@ -3,12 +3,12 @@
 copula_marginal_combos <- list(
   list(copula = "gaussian", marginal = "gaussian"),
   list(copula = "t",        marginal = "t"),
-  list(copula = "clayton",  marginal = "chisq"),
-  list(copula = "gumbel",   marginal = "laplace")
+  list(copula = "t",        marginal = "gaussian"),
+  list(copula = "frank",  marginal = "laplace")
 )
 
 rhos <- c(-0.75, -0.5, 0.25, 0, 0.25, 0.5, 0.75)
-dimension_of_X <- c(1, 15)
+dimension_of_X <- c(1)
 reps <- 50
 
 
@@ -32,7 +32,7 @@ for (combo in copula_marginal_combos) {
         df_all <- data_synthetic(n = 10000, d = d, rho = r,
                                  copula_type = cop,
                                  marginal = marg,
-                                 constant_propensity = FALSE)
+                                 constant_propensity = TRUE)
         df <- df_all[1:1000, ]
         df_test <- df_all[1001:10000, ]
         df$ITE <- df$Y1 - df$Y0
@@ -48,7 +48,7 @@ for (combo in copula_marginal_combos) {
               rho = r,
               add_confidence_intervals = add_CI,
               conformal = "CQR",
-              weighted_conformal = TRUE,
+              weighted_conformal = FALSE,
               CQR_qr = "auto",
               CATE_estimate = "T-learner"
             )
@@ -84,11 +84,14 @@ for (combo in copula_marginal_combos) {
 
 results_all <- bind_rows(results, results_with_CI)
 
+
+
+
+
 #write.csv(results_all, "results_copula.csv", row.names = FALSE)
 #results_all <- read.csv("results_copula.csv")
-results_all = results_all[results_all$d==1,]
 
-                          
+
 ###################### Plotting ####################
 generate_final_Drho_overlay_plot <- function(results_all) {
   library(ggplot2)
@@ -102,8 +105,8 @@ generate_final_Drho_overlay_plot <- function(results_all) {
     )
   
   # Full copula and marginal names
-  copula_names <- c(gaussian = "Gaussian", t = "Student-t", clayton = "Clayton", gumbel = "Gumbel")
-  marginal_names <- c(gaussian = "Gaussian", t = "Student-t", chisq = "Chi-squared", laplace = "Laplace")
+  copula_names <- c(gaussian = "Gaussian", t = "Student-t", clayton = "Student-t", gumbel = "Frank")
+  marginal_names <- c(gaussian = "Gaussian", t = "Student-t", chisq = "Gaussian", laplace = "Laplace")
   
   results_all <- results_all %>%
     mutate(
@@ -116,8 +119,8 @@ generate_final_Drho_overlay_plot <- function(results_all) {
   desired_order <- c(
     "Copula: Gaussian\nMarginal: Gaussian",
     "Copula: Student-t\nMarginal: Student-t",
-    "Copula: Clayton\nMarginal: Chi-squared",
-    "Copula: Gumbel\nMarginal: Laplace"
+    "Copula: Student-t\nMarginal: Gaussian",
+    "Copula: Frank\nMarginal: Laplace"
   )
   results_all$col_label <- factor(results_all$col_label, levels = desired_order)
   
@@ -170,6 +173,12 @@ generate_final_Drho_overlay_plot <- function(results_all) {
 
 final_plot <- generate_final_Drho_overlay_plot(results_all)
 ggsave("sim_copula_d_1.pdf", plot = final_plot, width = 7.5, height = 9.5, dpi = 500)
+
+
+
+
+
+
 
 
 
