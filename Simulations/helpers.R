@@ -146,10 +146,10 @@ data_synthetic <- function(n = 1000,
                            sigma_1 = 1, 
                            sigma_2 = 4, 
                            constant_propensity = FALSE, 
-                           copula_type = "gaussian", #choices: "gaussian", "clayton", "t", "gumbel"
-                           marginal = "gaussian"){ #choices: "gaussian", "laplace", "t", "chisq"
+                           copula_type = "gaussian", #choices: "gaussian", "t", "frank"
+                           marginal = "gaussian"){ #choices: "gaussian", "laplace", "t", "laplace", "chisq"
   # generate random 1D and 2D functions
-  random_function_1d <- function(freq = 0.1) {
+  random_function_1d <- function(freq = 0.15) {
     s = seq(-10, 10, length.out = 1001)
     f <- long_grid(s)
     f$noise <- rep(0, length(s))
@@ -203,20 +203,14 @@ data_synthetic <- function(n = 1000,
   }
   
   # Error generation using copulas
-  generate_errors <- function(n, rho, sigma_1 , sigma_2, copula_type = "gaussian", marginal = "gaussian") {
-    qlaplace <- function(p) {ifelse(p < 0.5, log(2 * p), -log(2 * (1 - p)))}
+  
+  
+  generate_errors <- function(n, rho, sigma_1, sigma_2, copula_type = "gaussian", marginal = "gaussian") {
+    library(copula)
     
-    tau = (2 / pi) * asin(rho); #relation between correlation and parameter in clayton/gumbel copula
-    if(tau <= -1) tau = -0.99; if(tau >= 1) tau = 0.99 #soft fix for edge cases
-    cop <- switch(copula_type,
-                  "gaussian" = normalCopula(param = rho, dim = 2),  # directly use rho
-                  "t"        = tCopula(param = rho, dim = 2, df = 3),  # also takes rho directly
-                  "clayton"  = claytonCopula(param = iTau(claytonCopula(), tau), dim = 2), #parameter and rho have this relation: (2 / pi) * asin(rho), althoguh rho is kendels tau not pearson
-                  "gumbel"   = gumbelCopula(param = iTau(gumbelCopula(), tau), dim = 2),   #parameter and rho have this relation: (2 / pi) * asin(rho)
-                  stop("Unsupported copula type.")
-    )
-    
-    u <- rCopula(n, cop)
+    qlaplace <- function(p) {
+      ifelse(p < 0.5, log(2 * p), -log(2 * (1 - p)))
+    }
     
     transform_marginal <- function(u_vec, type) {
       switch(type,
@@ -228,11 +222,57 @@ data_synthetic <- function(n = 1000,
       )
     }
     
+    find_tau_for_rho <- function(target_rho, copula_type = "frank", marginal = "gaussian",
+                                 sigma_1 = 1, sigma_2 = 1, n = 1e4) {
+      
+      obj_fn <- function(tau) {
+        # Cap tau to avoid extreme values
+        tau <- max(min(tau, 0.99), -0.99)
+        
+        theta <- switch(copula_type,
+                        "frank" = iTau(frankCopula(), tau),
+                        stop("Unsupported copula type.")
+        )
+        
+        cop <- switch(copula_type,
+                      "frank" = frankCopula(param = theta, dim = 2)
+        )
+        
+        u <- rCopula(n, cop)
+        x <- transform_marginal(u[, 1], marginal) * sqrt(sigma_1)
+        y <- transform_marginal(u[, 2], marginal) * sqrt(sigma_2)
+        
+        cor(x, y) - target_rho
+      }
+      
+      # Check feasibility
+      tryCatch({
+        uniroot(obj_fn, lower = -0.95, upper = 0.95)$root
+      }, error = function(e) {
+        stop("Could not match the desired Pearson correlation with the specified copula and marginal.")
+      })
+    }
+    
+    # Determine copula object based on copula_type
+    cop <- switch(copula_type,
+                  "gaussian" = normalCopula(param = rho, dim = 2),
+                  "t"        = tCopula(param = rho, dim = 2, df = 3),
+                  "frank"    = {
+                    tau <- find_tau_for_rho(rho, copula_type = "frank", marginal = marginal,
+                                            sigma_1 = sigma_1, sigma_2 = sigma_2)
+                    frankCopula(param = iTau(frankCopula(), tau), dim = 2)
+                  },
+                  stop("Unsupported copula type.")
+    )
+    
+    u <- rCopula(n, cop)
     eps1 <- transform_marginal(u[, 1], marginal) * sqrt(sigma_1)
     eps2 <- transform_marginal(u[, 2], marginal) * sqrt(sigma_2)
     
     data.frame(eps1, eps2)
   }
+  
+  
   
   eps <- generate_errors(n, rho, sigma_1, sigma_2, copula_type, marginal)
   epsilon1 <- eps[,1]
@@ -256,6 +296,7 @@ data_synthetic <- function(n = 1000,
     return(data.frame(X, Y0 = Y0, Y1 = Y1, Y_obs = Y_obs, treatment = treatment))
   }
 }
+
 
 
 
