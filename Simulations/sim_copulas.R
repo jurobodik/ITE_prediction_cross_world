@@ -87,14 +87,8 @@ results_all <- bind_rows(results, results_with_CI)
 
 
 
-
-
-#write.csv(results_all, "results_copula.csv", row.names = FALSE)
-#results_all <- read.csv("results_copula.csv")
-
-
 ###################### Plotting ####################
-generate_final_Drho_overlay_plot <- function(results_all) {
+generate_final_plot <- function(results_all) {
   library(ggplot2)
   library(dplyr)
   
@@ -106,7 +100,7 @@ generate_final_Drho_overlay_plot <- function(results_all) {
     )
   
   # Full copula and marginal names
-  copula_names <- c(gaussian = "Gaussian", t = "Student-t", clayton = "Student-t", gumbel = "Frank")
+  copula_names <- c(gaussian = "Gaussian", t = "Student-t", clayton = "Student-t", gumbel = "Frank", frank = "Frank")
   marginal_names <- c(gaussian = "Gaussian", t = "Student-t", chisq = "Gaussian", laplace = "Laplace")
   
   results_all <- results_all %>%
@@ -116,13 +110,13 @@ generate_final_Drho_overlay_plot <- function(results_all) {
       col_label = paste0("Copula: ", copula_full, "\nMarginal: ", marginal_full)
     )
   
-  # Fix order of columns
-  desired_order <- c(
-    "Copula: Gaussian\nMarginal: Gaussian",
-    "Copula: Student-t\nMarginal: Student-t",
-    "Copula: Student-t\nMarginal: Gaussian",
-    "Copula: Frank\nMarginal: Laplace"
-  )
+  # Automatically set desired order from copula_marginal_combos
+  desired_order <- sapply(copula_marginal_combos, function(combo) {
+    paste0(
+      "Copula: ", copula_names[[combo$copula]],
+      "\nMarginal: ", marginal_names[[combo$marginal]]
+    )
+  })
   results_all$col_label <- factor(results_all$col_label, levels = desired_order)
   
   # rho facet (parsed math labels)
@@ -162,7 +156,7 @@ generate_final_Drho_overlay_plot <- function(results_all) {
       legend.position = "none",
       axis.title = element_blank()
     ) +
-    labs(title = expression("Coverage of " * D[rho] * " and " * D[rho] * " + CI across copula-marginal combinations"))
+    labs(title = expression(''))
   
   print(p)
   return(p)
@@ -172,8 +166,9 @@ generate_final_Drho_overlay_plot <- function(results_all) {
 
 
 
-final_plot <- generate_final_Drho_overlay_plot(results_all)
-ggsave("sim_copula_d_1.pdf", plot = final_plot, width = 7.5, height = 9.5, dpi = 500)
+final_plot <- generate_final_plot(results_all)
+#write.csv(results_all, "results_copula.csv", row.names = FALSE)
+ggsave("sim_copula_figure.pdf", plot = final_plot, width = 7.5, height = 9.5, dpi = 500)
 
 
 
