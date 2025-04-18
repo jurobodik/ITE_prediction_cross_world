@@ -1,4 +1,4 @@
-# Cross-World Assumptions and Their Role in Refining Prediction Intervals for Individual Treatment Effects
+# Cross-World Assumption and Refining Prediction Intervals for Individual Treatment Effects
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![R](https://img.shields.io/badge/R-4.2+-blue.svg)](https://www.r-project.org/)
