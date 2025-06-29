@@ -82,7 +82,10 @@ result = D_rho_intervals(X, Y, treatment, new_points, rho=rho,
 print("CATE:", result["CATE"])
 print("Lower:", result["lower"])
 print("Upper:", result["upper"])
-
+```
+## How to choose ρ? 
+One should answer the question: “What proportion of the total noise variance can be attributed to hidden components affecting both potential outcomes similarly? ” 
+If no interpretation or domain knowledge is available, we recommend using ρ = 0 when coverage guarantees are of strong importance; otherwise, we recommend using ρ = 0.5 for the best performance across most practical scenarios.   
 
 
 
