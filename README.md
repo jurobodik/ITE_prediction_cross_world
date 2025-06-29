@@ -84,9 +84,24 @@ print("Lower:", result["lower"])
 print("Upper:", result["upper"])
 ```
 ## How to choose ρ? 
-One should answer the question: “What proportion of the total noise variance can be attributed to hidden components affecting both potential outcomes similarly? ” 
-If no interpretation or domain knowledge is available, we recommend using ρ = 0 when coverage guarantees are of strong importance; otherwise, we recommend using ρ = 0.5 for the best performance across most practical scenarios.   
+Ask: “What proportion of the total noise variance can be attributed to hidden components affecting both potential outcomes similarly? ” In the additive model 
 
+Y(1) = μ₁(X) + H + ε̃₁  
+Y(0) = μ₀(X) + H + ε̃₀  
+
+where:
+- `H` is a hidden variable shared across potential outcomes,
+- `ε̃₁` and `ε̃₀` are independent noise terms.
+
+In this setup, ρ corresponds to the fraction of noise variance explained by the shared hidden component:
+
+ρ = var(H) / [var(H) + var(ε̃)]
+
+This gives a principled way to discuss plausible values of ρ based on how much of the total outcome noise is due to shared latent traits.
+
+If no interpretation or domain knowledge is available, we recommend using ρ = 0 when coverage guarantees are of strong importance; otherwise, we recommend using ρ = 0.5 for the best performance across most practical scenarios. If treatment has little effect, do not hesitate to use ρ>=0.75. 
+
+When in doubt, run sensitivity analysis over a range of ρ values.
 
 
 
