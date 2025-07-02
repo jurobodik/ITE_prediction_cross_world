@@ -1,4 +1,4 @@
-#Simulations about the coverage of the D_rho intervals for different copula and marginal distributions of epsilon
+#Simulations about the coverage of the CW_rho intervals for different copula and marginal distributions of epsilon
 
 set.seed(123)
 copula_marginal_combos <- list(
@@ -41,7 +41,7 @@ for (combo in copula_marginal_combos) {
         
         for (add_CI in c(FALSE, TRUE)) {
           res <- tryCatch({
-            D_rho_intervals(
+            CW_rho_intervals(
               X = data.frame(df[,1:d]),
               Y = df$Y_obs,
               treatment = df$treatment,
@@ -95,8 +95,8 @@ generate_final_plot <- function(results_all) {
   # Set Method
   results_all <- results_all %>%
     mutate(
-      Method = ifelse(ci, "D_rho + CI", "D_rho"),
-      Method = factor(Method, levels = c("D_rho", "D_rho + CI"))
+      Method = ifelse(ci, "CW_rho + CI", "CW_rho"),
+      Method = factor(Method, levels = c("CW_rho", "CW_rho + CI"))
     )
   
   # Full copula and marginal names
@@ -125,12 +125,12 @@ generate_final_plot <- function(results_all) {
   
   # Labels and colors
   method_labels <- c(
-    "D_rho" = expression(D[rho]),
-    "D_rho + CI" = expression(D[rho]*" + CI")
+    "CW_rho" = expression(D[rho]),
+    "CW_rho + CI" = expression(D[rho]*" + CI")
   )
   custom_colors <- c(
-    "D_rho" = "#1f77b4",
-    "D_rho + CI" = "#d62728"
+    "CW_rho" = "#1f77b4",
+    "CW_rho + CI" = "#d62728"
   )
   
   # Plot
