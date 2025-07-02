@@ -1,4 +1,4 @@
-#Simulations about the coverage of the D_rho intervals in comparison with other approaches such as Lei et al.
+#Simulations about the coverage of the CW_rho intervals in comparison with other approaches such as Lei et al.
 
 set.seed(123)
 rho_vals <- c(1, 0.5, 0, -0.5, -1)
@@ -9,7 +9,7 @@ data_generation = 'Synthetic Gaussian'
 
 
 
-result_D_rho <- result_D_rho_with_CI <-result_D_rho_0.25 <- list()
+result_CW_rho <- result_CW_rho_with_CI <-result_CW_rho_0.25 <- list()
 result_lei_inexact <- result_lei_exact <- result_jonkers <- result_alaa <- list()
 df_final = list()
 for(rho_true in rho_vals){  
@@ -37,15 +37,15 @@ for(rho_true in rho_vals){
     
     
     
-    D_rho <- D_rho_intervals(X = data[, 1:d], Y = data$Y_obs, treatment = data$treatment, 
+    CW_rho <- CW_rho_intervals(X = data[, 1:d], Y = data$Y_obs, treatment = data$treatment, 
                                      new_points = new_points, rho = rho_true, 
                                      weighted_conformal = TRUE, add_confidence_intervals = FALSE)
-    if(rho_true == -1) {D_rho_with_CI <-D_rho_0.25 <- D_rho}else{
-      D_rho_with_CI <- D_rho_intervals(X = data[, 1:d], Y = data$Y_obs, treatment = data$treatment, 
+    if(rho_true == -1) {CW_rho_with_CI <-CW_rho_0.25 <- CW_rho}else{
+      CW_rho_with_CI <- CW_rho_intervals(X = data[, 1:d], Y = data$Y_obs, treatment = data$treatment, 
                                                new_points = new_points, rho = rho_true, 
                                                weighted_conformal = TRUE, add_confidence_intervals = TRUE)
       
-      D_rho_0.25 <- D_rho_intervals(X = data[, 1:d], Y = data$Y_obs, treatment = data$treatment, 
+      CW_rho_0.25 <- CW_rho_intervals(X = data[, 1:d], Y = data$Y_obs, treatment = data$treatment, 
                                             new_points = new_points, rho = rho_true-0.25, 
                                             weighted_conformal = TRUE, add_confidence_intervals = FALSE)
     }
@@ -66,14 +66,14 @@ for(rho_true in rho_vals){
     Y_new <- data_test$Y1 - data_test$Y0
     
     
-    coverage_D_rho <- estimate_coverage(X_new, Y_new, 
-                                        l = D_rho$lower, u = D_rho$upper)
-    coverage_D_rho_with_CI <- estimate_coverage(X_new,  Y_new, 
-                                                l = D_rho_with_CI$lower, 
-                                                u = D_rho_with_CI$upper)
-    coverage_D_rho_0.25 <- estimate_coverage(X_new,  Y_new, 
-                                             l = D_rho_0.25$lower, 
-                                             u = D_rho_0.25$upper)
+    coverage_CW_rho <- estimate_coverage(X_new, Y_new, 
+                                        l = CW_rho$lower, u = CW_rho$upper)
+    coverage_CW_rho_with_CI <- estimate_coverage(X_new,  Y_new, 
+                                                l = CW_rho_with_CI$lower, 
+                                                u = CW_rho_with_CI$upper)
+    coverage_CW_rho_0.25 <- estimate_coverage(X_new,  Y_new, 
+                                             l = CW_rho_0.25$lower, 
+                                             u = CW_rho_0.25$upper)
     coverage_ITE_Lei_inexact <- estimate_coverage(X_new, Y_new, 
                                                   l= Lei_inexact$lower,
                                                   u= Lei_inexact$upper)
@@ -87,31 +87,31 @@ for(rho_true in rho_vals){
                                            l= alaa$lower,
                                            u= alaa$upper)
     
-    length_D_rho <- estimate_average_length(D_rho$lower, D_rho$upper)
-    length_D_rho_with_CI <- estimate_average_length(D_rho_with_CI$lower, D_rho_with_CI$upper)
-    length_D_rho_0.25 <- estimate_average_length(D_rho_0.25$lower, D_rho_0.25$upper)
+    length_CW_rho <- estimate_average_length(CW_rho$lower, CW_rho$upper)
+    length_CW_rho_with_CI <- estimate_average_length(CW_rho_with_CI$lower, CW_rho_with_CI$upper)
+    length_CW_rho_0.25 <- estimate_average_length(CW_rho_0.25$lower, CW_rho_0.25$upper)
     length_Lei_inexact <- estimate_average_length(Lei_inexact$lower, Lei_inexact$upper)
     length_Lei_exact <- estimate_average_length(Lei_exact$lower, Lei_exact$upper)
     length_jonkers <- estimate_average_length(jonkers$lower, jonkers$upper)
     length_alaa <- estimate_average_length(alaa$lower, alaa$upper)
     
-    result_D_rho[[k]] <- c(coverage_D_rho, length_D_rho)
-    result_D_rho_with_CI[[k]] <- c(coverage_D_rho_with_CI, length_D_rho_with_CI)
-    result_D_rho_0.25[[k]] <- c(coverage_D_rho_0.25, length_D_rho_0.25)
+    result_CW_rho[[k]] <- c(coverage_CW_rho, length_CW_rho)
+    result_CW_rho_with_CI[[k]] <- c(coverage_CW_rho_with_CI, length_CW_rho_with_CI)
+    result_CW_rho_0.25[[k]] <- c(coverage_CW_rho_0.25, length_CW_rho_0.25)
     result_lei_inexact[[k]] <- c(coverage_ITE_Lei_inexact, length_Lei_inexact)
     result_lei_exact[[k]] <- c(coverage_ITE_Lei_exact, length_Lei_exact)
     result_jonkers[[k]] <- c(coverage_ITE_jonkers, length_jonkers)
     result_alaa[[k]] <- c(coverage_ITE_alaa, length_alaa)
     
-    cat('Iteration:', k, ' and rho = ', rho_true ,  '\n', 'D_rho:', result_D_rho[[k]], '\n', 'D_rho_with_CI:', result_D_rho_with_CI[[k]], '\n', 'D_rho_0.25:', result_D_rho_0.25[[k]], '\n',
+    cat('Iteration:', k, ' and rho = ', rho_true ,  '\n', 'CW_rho:', result_CW_rho[[k]], '\n', 'CW_rho_with_CI:', result_CW_rho_with_CI[[k]], '\n', 'CW_rho_0.25:', result_CW_rho_0.25[[k]], '\n',
         'Lei_inexact:', result_lei_inexact[[k]], '\n', 'Lei_exact:', result_lei_exact[[k]], '\n', 'Jonkers:', result_jonkers[[k]], '\n', 'Alaa:', result_alaa[[k]], '\n')
   }
   
   # Combine results
   methods <- list(
-    D_rho = result_D_rho,
-    D_rho_with_CI = result_D_rho_with_CI,
-    D_rho_0.25 = result_D_rho_0.25,
+    CW_rho = result_CW_rho,
+    CW_rho_with_CI = result_CW_rho_with_CI,
+    CW_rho_0.25 = result_CW_rho_0.25,
     Lei_inexact = result_lei_inexact,
     Lei_exact = result_lei_exact,
     CMC = result_jonkers,
@@ -149,12 +149,12 @@ library(grid)
 rho_vals <- rho_vals[5:1]#from back to front
 # Set factor levels for methods
 all_results$Method <- factor(all_results$Method,
-                             levels = c('D_rho_with_CI','D_rho_0.25', "D_rho", "CMC", "DR", "Lei_inexact","Lei_exact")
+                             levels = c('CW_rho_with_CI','CW_rho_0.25', "CW_rho", "CMC", "DR", "Lei_inexact","Lei_exact")
 )
 method_labels <- c(
-  "D_rho"        = expression(D[rho]),
-  "D_rho_with_CI" = expression(D[rho]*" + CI"),
-  "D_rho_0.25"   = expression(D[rho-0.25]),
+  "CW_rho"        = expression(D[rho]),
+  "CW_rho_with_CI" = expression(D[rho]*" + CI"),
+  "CW_rho_0.25"   = expression(D[rho-0.25]),
   "CMC"          = "CMC",
   "DR"           = "DR",
   "Lei_inexact"  = "Lei (inexact)",
@@ -170,11 +170,11 @@ rho_labels <- list(
   `1` = expression(rho == 1)
 )
 
-highlight_methods <- c("D_rho", "D_rho_with_CI", "D_rho_0.25")
+highlight_methods <- c("CW_rho", "CW_rho_with_CI", "CW_rho_0.25")
 custom_colors <- c(
-  "D_rho" = "#1f77b4",         # blue
-  "D_rho_with_CI" = "#d62728", # red
-  "D_rho_0.25" = "#2ca02c",    # green
+  "CW_rho" = "#1f77b4",         # blue
+  "CW_rho_with_CI" = "#d62728", # red
+  "CW_rho_0.25" = "#2ca02c",    # green
   "CMC" = "gray40",
   "DR" = "gray60",
   "Lei_inexact" = "gray80",
@@ -276,13 +276,13 @@ rho_vals <- c(-1, -0.5, 0, 0.5, 1)
 
 # Set factor levels for methods
 all_results$Method <- factor(all_results$Method,
-                             levels = c("Lei_exact", "Lei_inexact", "DR", "CMC", "D_rho", "D_rho_0.25", "D_rho_with_CI"))
+                             levels = c("Lei_exact", "Lei_inexact", "DR", "CMC", "CW_rho", "CW_rho_0.25", "CW_rho_with_CI"))
 
 # Labels
 method_labels <- c(
-  "D_rho"        = expression(D[rho]),
-  "D_rho_with_CI" = expression(D[rho]*" + CI"),
-  "D_rho_0.25"   = expression(D[rho-0.25]),
+  "CW_rho"        = expression(D[rho]),
+  "CW_rho_with_CI" = expression(D[rho]*" + CI"),
+  "CW_rho_0.25"   = expression(D[rho-0.25]),
   "CMC"          = "CMC",
   "DR"           = "DR",
   "Lei_inexact"  = "Lei (inexact)",
@@ -298,9 +298,9 @@ rho_labels <- list(
 )
 
 custom_colors <- c(
-  "D_rho" = "#1f77b4",
-  "D_rho_with_CI" = "#d62728",
-  "D_rho_0.25" = "#2ca02c",
+  "CW_rho" = "#1f77b4",
+  "CW_rho_with_CI" = "#d62728",
+  "CW_rho_0.25" = "#2ca02c",
   "CMC" = "gray40",
   "DR" = "gray60",
   "Lei_inexact" = "gray80",
