@@ -7,7 +7,7 @@
 #
 #   Core Function:
 #     - `CW_rho_intervals`:
-#         * Estimates prediction intervals for ITEs at new covariate values
+#         * Estimates prediction intervals for ITEs given new covariate values
 #         * Combines uncertainty from both treatment arms using a correlation-based formula
 #         * Optionally adds bootstrap-based confidence intervals to account for CATE variability
 #
