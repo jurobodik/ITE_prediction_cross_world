@@ -2,11 +2,11 @@
 # Author: jurajbodik.com
 # Description:
 #   This script provides an implementation of prediction intervals 
-#   for Individual Treatment Effects (ITE) using the D_rho_intervals function 
+#   for Individual Treatment Effects (ITE) using the CW_rho_intervals function 
 #   under the Cross-World Assumption, characterized by the correlation parameter `rho`.
 #
 #   Core Function:
-#     - `D_rho_intervals`:
+#     - `CW_rho_intervals`:
 #         * Estimates prediction intervals for ITEs at new covariate values
 #         * Combines uncertainty from both treatment arms using a correlation-based formula
 #         * Optionally adds bootstrap-based confidence intervals to account for CATE variability
@@ -55,7 +55,7 @@ from sklearn.ensemble import GradientBoostingClassifier #We use this for propens
 import catboost as cb
 from pygam import ExpectileGAM
 
-def D_rho_intervals(
+def CW_rho_intervals(
   X,                                 # Feature matrix (pd.DataFrame)
   Y,                                 # (factual) outcome variable (np.array)
   treatment,                         # Treatment assignment (0 or 1) (np.array)
