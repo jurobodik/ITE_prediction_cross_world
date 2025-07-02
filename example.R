@@ -1,10 +1,10 @@
 "
 This script serves as a demo - example to try out and possibly change for your dataset
 First, we generate synthetic data using the `data_synthetic()` function. It simulates realistic treatment-outcome dependencies using various copulas and marginal noise distributions.
-Then, we apply the `D_rho_intervals` function to estimate prediction intervals for Individual Treatment Effects (ITE).
-The `D_rho_intervals` function can be found in the `D_rho_intervals_function.R` file
+Then, we apply the `CW_rho_intervals` function to estimate prediction intervals for Individual Treatment Effects (ITE).
+The `CW_rho_intervals` function can be found in the `CW_rho_intervals_function.R` file
 
-Function source: source(D_rho_intervals_function.R)
+Function source: source(CW_rho_intervals_function.R)
 
 This function is applied on the synthetic dataset and plotted the results below
 "
@@ -171,7 +171,7 @@ treatment = data$treatment
 
 
 
-D_rho = D_rho_intervals(X, Y, treatment, new_points, rho = rho_used, 
+CW_rho = CW_rho_intervals(X, Y, treatment, new_points, rho = rho_used, 
                                 weighted_conformal = TRUE, #should we estimate propensity scores and use weighted conformal prediction?
                                 conformal = 'CQR', #choices: 'CQR', 'PCS', 'CLEAR', 'naive' 
                                 add_confidence_intervals = TRUE, #If TRUE, then we compute confidence intervals for CATE and add them to the prediction intervals
@@ -181,8 +181,8 @@ D_rho = D_rho_intervals(X, Y, treatment, new_points, rho = rho_used,
 
 
 true_ITE <- data_test$Y1 - data_test$Y0
-coverage_ITE <- mean(true_ITE >= D_rho$lower & true_ITE <= D_rho$upper)
-length_ITE <- mean(D_rho$upper - D_rho$lower)
+coverage_ITE <- mean(true_ITE >= CW_rho$lower & true_ITE <= CW_rho$upper)
+length_ITE <- mean(CW_rho$upper - CW_rho$lower)
 
 cat(" Coverage for ITE: ", coverage_ITE, "\n", '  Average Length: ',length_ITE, "\n")
 
@@ -262,10 +262,10 @@ if(d==1){
   
   # Prepare data
   df_combined <- data.frame(
-    X = D_rho$new_points[,1],
-    CATE = as.numeric(D_rho$CATE),
-    lower_CATE = as.numeric(D_rho$lower),
-    upper_CATE = as.numeric(D_rho$upper),
+    X = CW_rho$new_points[,1],
+    CATE = as.numeric(CW_rho$CATE),
+    lower_CATE = as.numeric(CW_rho$lower),
+    upper_CATE = as.numeric(CW_rho$upper),
     Y_obs = data_test$Y_obs,
     treatment = factor(data_test$treatment),
     true_ITE = data_test$Y1 - data_test$Y0,
