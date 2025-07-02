@@ -16,9 +16,9 @@ Assuming values or bounds on ρ(x) allows us to refine the uncertainty quantific
 ---
 ---
 
-## ⚙️ Core Function: `D_rho_intervals`
+## ⚙️ Core Function: `CW_rho_intervals`
 
-The function `D_rho_intervals()` constructs ITE prediction intervals under a user-specified cross-world correlation parameter ρ.
+The function `CW_rho_intervals()` constructs ITE prediction intervals under a user-specified cross-world correlation parameter ρ.
 
 Supported options:
 - CATE estimators: `T-learner`, `Causal Forest`
@@ -30,7 +30,7 @@ Supported options:
 ## 🧪 Example Usage (R or Python)
 
 ```r
-source("D_rho_intervals_function.R")
+source("CW_rho_intervals_function.R")
 
 set.seed(0)
 n <- 1000; d <- 5; rho <- 0.5
@@ -43,7 +43,7 @@ Y <- ifelse(treatment == 1, Y1, Y0)
 
 new_points <- as.data.frame(matrix(rnorm(10 * d), ncol = d)) #at what points do you want to estimate ITE?
 
-result <- D_rho_intervals(X, Y, treatment, new_points, rho,
+result <- CW_rho_intervals(X, Y, treatment, new_points, rho,
                           desired_coverage = 0.9, 
                           conformal = "CQR",
                           weighted_conformal = FALSE,
@@ -53,10 +53,10 @@ print(result$CATE)
 print(result$lower)
 print(result$upper)
 ```
-We also implemented a translation of D_rho_intervals into python:
+We also implemented a translation of CW_rho_intervals into python:
 
 ```python
-from D_rho_intervals_function import D_rho_intervals
+from CW_rho_intervals_function import CW_rho_intervals
 import numpy as np
 
 np.random.seed(0)
@@ -74,7 +74,7 @@ Y = np.where(treatment == 1, Y1, Y0)
 
 new_points = np.random.randn(10, d) #at what points do you want to estimate ITE?
 
-result = D_rho_intervals(X, Y, treatment, new_points, rho=rho,
+result = CW_rho_intervals(X, Y, treatment, new_points, rho=rho,
                          desired_coverage = 0.9, 
                          conformal="CQR", weighted_conformal=False,
                          add_confidence_intervals=True)
