@@ -2,12 +2,12 @@
 # Author: jurajbodik.com
 # Description:
 #   This script provides an implementation of prediction intervals 
-#   for Individual Treatment Effects (ITE) using D_rho_intervals under
+#   for Individual Treatment Effects (ITE) using CW_rho_intervals under
 #   the Cross-World Assumption (correlation parameter `rho`). 
 #   It supports several conformal prediction methods (CQR, PCS, CLEAR, Naive) 
 #   and two CATE estimation strategies (T-learner and Causal Forest).
 #
-#   The core function is `D_rho_intervals`, which:
+#   The core function is `CW_rho_intervals`, which:
 #     - Estimates ITE prediction intervals at new covariate values
 #     - Combines uncertainty from both treated and control outcomes
 #     - Optionally adds bootstrap-based confidence intervals (recommended, but a bit slower)
@@ -40,8 +40,8 @@
 # 
 # ################# Define new points to predict ITEs
 #  new_points <- as.data.frame(matrix(rnorm(10 * d), ncol = d))
-# #################  Compute D_rho_intervals
-#  result <- D_rho_intervals(X = X,
+# #################  Compute CW_rho_intervals
+#  result <- CW_rho_intervals(X = X,
 #                            Y = Y,
 #                            treatment = treatment,
 #                            new_points = new_points,
@@ -69,7 +69,7 @@ library(Hmisc)
 library(MASS)
 
 
-D_rho_intervals  <- function(X, Y, treatment, new_points,
+CW_rho_intervals  <- function(X, Y, treatment, new_points,
                         rho,
                         desired_coverage = 0.9, 
                         train_calib_split = 0.8, 
@@ -862,7 +862,7 @@ D_rho_intervals  <- function(X, Y, treatment, new_points,
 
 
 
-#Do you want to compute D_rho intervals for different Uncertainty estimation, or different CATE estimate? Its easy!
+#Do you want to compute CW_rho intervals for different Uncertainty estimation, or different CATE estimate? Its easy!
 #input estimate0, estimate1 and CATE in the following form:
 #   estimate0 is a data-frame with estimate0$f_hat;  estimate0$lower;  estimate0$upper; estimate0$new_points
 #   estimate1 is a data-frame with estimate1$f_hat;  estimate1$lower;  estimate1$upper; estimate1$new_points
@@ -872,7 +872,7 @@ D_rho_intervals  <- function(X, Y, treatment, new_points,
 
 
 
-D_rho_intervals_compute_yourself = function(estimate0, estimate1, CATE = NULL, 
+CW_rho_intervals_compute_yourself = function(estimate0, estimate1, CATE = NULL, 
                            rho = 0, CATE_CI = NULL) {
   rho_distance = function(x, y, rho)return(sqrt(x^2 + y^2 - 2*rho*x*y))
   CI_addition = function(x, rho) return( x*((1+rho)/2)^2 )       
