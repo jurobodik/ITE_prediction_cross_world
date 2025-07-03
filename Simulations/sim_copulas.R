@@ -95,8 +95,8 @@ generate_final_plot <- function(results_all) {
   # Set Method
   results_all <- results_all %>%
     mutate(
-      Method = ifelse(ci, "CW_rho + CI", "CW_rho"),
-      Method = factor(Method, levels = c("CW_rho", "CW_rho + CI"))
+      Method = ifelse(ci, "CW(rho)+CI", "CW(rho)"),
+      Method = factor(Method, levels = c("CW(rho)", "CW(rho)+CI"))
     )
   
   # Full copula and marginal names
@@ -125,12 +125,12 @@ generate_final_plot <- function(results_all) {
   
   # Labels and colors
   method_labels <- c(
-    "CW_rho" = expression(D[rho]),
-    "CW_rho + CI" = expression(D[rho]*" + CI")
+    "CW(rho)" = expression(CW(rho)),
+    "CW(rho)+CI" = expression(CW(rho)*"+CI")
   )
   custom_colors <- c(
-    "CW_rho" = "#1f77b4",
-    "CW_rho + CI" = "#d62728"
+    "CW(rho)" = "#1f77b4",
+    "CW(rho)+CI" = "#d62728"
   )
   
   # Plot
