@@ -194,7 +194,7 @@ ggsave("Picture_Rho_effect.pdf", width = 8.2, height = 4, units = "in", dpi = 30
 
 
 
-
+#Figure 2: four plots about rho and CW(rho) on synthetic 1D dataset
 #################Generating dataset##############
 
 CATE_function <- function(x) {
