@@ -458,7 +458,7 @@ full_plot <- wrap_plots(
 )
 
 # Create a patchwork design with 6 rows (header + 5 rhos) and 3 columns
-layout_matrix <- area(
+layout_matrix <- patchwork::area(
   t = c(1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6),
   l = c(1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3),
   b = c(1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6),
