@@ -1,0 +1,596 @@
+# Two pictures used in the paper are generated here
+# Maybe you need also to run helpers.R and CW_rho_intervals_function.R before, at least the libraries
+
+library(ggplot2)
+library(gridExtra)
+library(grid)
+library(patchwork)
+library(cfcausal)
+
+set.seed(123)
+n1 = 10; n2 = 10
+epsilon = rnorm(n1+n2, sd = 2)-0.5 
+epsilon[5]=8
+ATE = 3
+# First plot - Original case
+
+X = sample(jitter(seq(-1, 1, length.out = n1 + n2), amount = 0.3), n1 + n2, replace = FALSE)
+X[9]=0
+epsilon1 = epsilon
+epsilon2 = -2*epsilon
+
+# Potential outcomes with small X effect
+Y0 = 5*X + epsilon1
+Y1 = ATE+ (5*X + epsilon1)  + epsilon2 
+
+
+treatment = c(rep(0, n1), rep(1, n2))
+Y_obs = ifelse(treatment == 1, Y1, Y0)
+data1 = data.frame(X, Y0, Y1, Y_obs, treatment)
+data1$OutcomeType = factor(ifelse(data1$treatment == 1, "Treated", "Untreated"))
+
+
+# Second plot - Inverse case
+
+epsilon1 =epsilon
+epsilon2 = rep(0, n1+n2)
+# Potential outcomes with small X effect
+Y_0 = Y0[1:n1]; Y_1 = Y1[1:n1]+2*epsilon1[1:n1]
+Y_1 = c(Y_1, Y1[(n1+1):(n1+n2)])
+Y_0 = c(Y_0, Y1[(n1+1):(n1+n2)] -ATE)
+
+
+Y0 = Y_0; Y1 = Y_1
+Y_obs = ifelse(treatment == 1, Y1, Y0)
+
+# Data frame for second plot
+data2 = data.frame(X, Y0, Y1, Y_obs, treatment)
+data2$OutcomeType = factor(ifelse(data2$treatment == 1, "Treated", "Untreated"))
+
+
+
+plot1 <- ggplot(data1, aes(x = X)) +
+  geom_segment(aes(y = Y0, yend = Y1, xend = X, color = OutcomeType), linetype = "dashed", alpha = 0.5) +
+  geom_point(aes(y = Y0, shape = "Counterfactual", color = OutcomeType), alpha = 0.5, size = 2) +
+  geom_point(aes(y = Y1, shape = "Counterfactual", color = OutcomeType), alpha = 0.5, size = 2) +
+  geom_point(aes(y = Y_obs, shape = "Observed", color = OutcomeType), size = 3) +
+  geom_line(aes(y = 5 * X +ATE), color = "red", linetype = "solid", size = 0.2) +
+  geom_line(aes(y = 5 * X ), color = "blue", linetype = "solid", size = 0.2) +
+  scale_shape_manual(values = c("Observed" = 16, "Counterfactual" = 1)) +
+  scale_color_manual(values = c("Treated" = "red", "Untreated" = "blue")) +
+  theme_minimal() +
+  labs(title = expression(rho == -1),
+       x = "X", y = "Outcome") +
+  theme(legend.position = "none", 
+        plot.title = element_text(hjust = 0.5))  # Center the title
+
+plot2 <- ggplot(data2, aes(x = X)) +
+  geom_segment(aes(y = Y0, yend = Y1, xend = X, color = OutcomeType), linetype = "dashed", alpha = 0.5) +
+  geom_point(aes(y = Y0, shape = "Counterfactual", color = OutcomeType), alpha = 0.5, size = 2) +
+  geom_point(aes(y = Y1, shape = "Counterfactual", color = OutcomeType), alpha = 0.5, size = 2) +
+  geom_point(aes(y = Y_obs, shape = "Observed", color = OutcomeType), size = 3) +
+  geom_line(aes(y = 5 * X +ATE), color = "red", linetype = "solid", size = 0.2) +
+  geom_line(aes(y = 5 * X ), color = "blue", linetype = "solid", size = 0.2) +
+  scale_shape_manual(values = c("Observed" = 16, "Counterfactual" = 1)) +
+  scale_color_manual(values = c("Treated" = "red", "Untreated" = "blue")) +
+  theme_minimal() +
+  labs(title = expression(rho == 1),  
+       x = "X", y = "Outcome") +
+  theme(legend.position = "none", 
+        plot.title = element_text(hjust = 0.5))  # Center the title
+
+# --- Manually define 4-point legend data ---
+legend_df <- data.frame(
+  x = rep(1, 4),
+  y = 1:4,
+  color = c("red", "red", "blue", "blue"),
+  shape = c(16, 1, 16, 1),
+  label = c("Observed Treated", "Counterfactual Treated", "Observed Untreated", "Counterfactual Untreated")
+)
+
+# Create custom legend
+legend <- ggplot(legend_df, aes(x = x, y = y)) +
+  geom_point(aes(color = label, shape = label), size = 3) +  # Larger point size in the plot
+  scale_color_manual(values = setNames(legend_df$color, legend_df$label)) +
+  scale_shape_manual(values = setNames(legend_df$shape, legend_df$label)) +
+  guides(
+    color = guide_legend(override.aes = list(size = 3.5)),
+    shape = guide_legend(override.aes = list(size = 3.5))
+  ) +
+  labs(color = "", shape = "") +
+  theme_void() +
+  theme(
+    legend.position = "bottom",
+    legend.text = element_text(size = 12)  # Increase label font size
+  )
+
+
+# Extract the legend grob
+legend_grob <- ggplotGrob(legend)$grobs[[which(sapply(ggplotGrob(legend)$grobs, function(x) x$name) == "guide-box")]]
+
+# Combine everything
+grid.arrange(
+  legend_grob, plot1, plot2,
+  ncol = 2, nrow = 2,
+  layout_matrix = rbind(c(1, 1), c(2, 3)),
+  widths = c(2.7, 2.7), heights = c(0.2, 2.5)
+)
+
+
+#save as pdf
+ggsave("Picture_Rho_effect.pdf", width = 8.2, height = 4, units = "in", dpi = 300)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#################Generating dataset##############
+
+CATE_function <- function(x) {
+  # Nonlinear, oscillatory function
+  f <- 5 * x + 2 * sin(6 * x) + 1.5 * x^5
+  # Normalize to range [0, 10]
+  scaled_f <- 10 * (f - min(f)) / (max(f) - min(f))
+  return(scaled_f)
+}
+
+data_generating_process_1D = function(n, rho, sigma_2 = 4, constant_propensity = FALSE){
+  
+  
+  CATE_function = CATE_function
+  Baseline_function = function(X) 15+5*X
+  covariance = rho * sqrt(sigma_2)
+  epsilons = mvrnorm(n = n, mu = c(0, 0), 
+                     Sigma = matrix(c(1, covariance, covariance, sigma_2), nrow = 2))
+  epsilon1 = epsilons[,1]
+  epsilon2 = epsilons[,2]
+  
+  X = runif(n, -1, 1)
+  Y0 = Baseline_function(X) + epsilon1
+  Y1 = Baseline_function(X) + CATE_function(X) + epsilon2 
+  
+  if(constant_propensity == FALSE){
+    treatment = c()
+    for (i in 1:(n)){
+      if (runif(1) < ((3+X[i])/8)){
+        treatment = c(treatment, 0)
+      } else {
+        treatment = c(treatment, 1)
+      }}}else{
+        treatment = sample(c(0,1), n, replace = TRUE)
+      }
+  
+  Y_obs = ifelse(treatment == 1, Y1, Y0)
+  data.frame(X, Y0, Y1, Y_obs, treatment)
+}
+
+
+################# Lei et al. method for ITE estimation ##############
+Lei_ITE = function(X, Y, T, new_points, exact = TRUE, outfun = "quantRF"){
+  
+  X = matrix(unlist(X), nrow = nrow(data.frame(X)))
+  
+  new_points <- matrix(unlist(new_points), ncol=ncol(data.frame(new_points)))
+  
+  CIfun <- conformalIte(X, Y, T, alpha = 0.1, 
+                        algo = "nest", exact = exact, type = "CQR",
+                        quantiles = c(0.05, 0.95), 
+                        outfun = "quantRF", useCV = FALSE)
+  result = CIfun(new_points)
+  return(list(upper = result$upper, lower = result$lower, new_points = new_points))
+}
+
+
+################# Our method for ITE estimation ##############
+
+CQR = function(X, Y, new_points,
+               desired_coverage = 0.9, train_calib_split = 0.8, 
+               qr = 'auto', CQR_type = 'multiplicative'){
+  if(qr == 'Naive' )qr = 'naive'
+  if(qr == 'auto'){if(ncol(data.frame(X))>5){qr = 'RF'}else{qr = 'qGAM'}}
+  if(qr != 'RF' & qr != 'qGAM' & qr != 'naive')stop("Quantile regression method not recognized. Choose 'RF' or 'qGAM' or 'naive'")
+  #data handling and splitting
+  data_original = data.frame(X=X, Y=Y)
+  X=data.frame(X); Y=data.frame(Y);
+  
+  d = ncol(X); if (is.null(nrow(X))) {d=1}
+  names(data_original) <- c(paste0("X", 1:d), "Y")
+  names(X) <- c(paste0("X", 1:d))
+  new_points = data.frame(new_points); names(new_points) <- c(paste0("X", 1:d))
+  my_sequence = rbind(X, new_points)
+  
+  n=nrow(Y);
+  train = 1:(n*train_calib_split); calib = (n*train_calib_split+1):n
+  
+  X_train = X[train,]; Y_train = Y[train,];
+  X_calib = X[calib,]; Y_calib = Y[calib,];
+  
+  n_train = length(Y_train); n_calib = length(Y_calib);
+  index_sequences = (n_train+1):(n_train+n_calib)
+  
+  create_formula = function(X, smoothing=TRUE){
+    form="Y ~ "
+    d= ncol(X); if (is.null(nrow(X))) {d=1}
+    if(d==1){if(smoothing==FALSE)return(as.formula('Y~X1'))else return(as.formula('Y~s(X1)'))}
+    if(smoothing==TRUE){
+      for (i in 1:d) {#Discrete variable is if it contains <=9 different values
+        if (  length(unique(X[,i]))>9  ) {form=paste(form, paste0("s(X", i,  ")+"))}
+        if (  length(unique(X[,i]))<=9) {form=paste(form, paste0("as.factor(X", i,  ")+"))  }
+      }
+    }
+    if(smoothing==FALSE){
+      for (i in 1:d) {form=paste(form, paste0("X", i, "+"))}
+    }
+    
+    form=substr(form,1,nchar(form)-1)
+    return(as.formula(form))
+  }
+  
+  
+  #Quantile regression
+  X = X_train; Y = Y_train
+  n=length(Y_train);
+  data = data.frame(X=X_train, Y=Y_train);   names(data) <- c(paste0("X", 1:d), "Y")
+  
+  
+  
+  if(d==1){newdata = data.frame(X1 = c(my_sequence))}else{newdata = my_sequence}
+  
+  if(qr == 'qGAM'){
+    sink(tempfile()) #This should stop from printing to the console (verboise=FALSE doesnt work)
+    fit_f <- qgam(create_formula(X), data = data, qu = (1+desired_coverage)/2)
+    quantile_estimates_0.95 = predict(fit_f, newdata = newdata)
+    
+    fit_f <- qgam(create_formula(X), data = data, qu = 0.5)
+    quantile_estimates_0.5 = predict(fit_f, newdata = newdata)
+    
+    fit_f <- qgam(create_formula(X), data = data, qu = (1-desired_coverage)/2)
+    quantile_estimates_0.05 = predict(fit_f, newdata = newdata)
+    
+    sink()
+  }
+  if(qr == 'RF' || qr == 'naive'){
+    qrf_model <- quantregForest(x = data.frame(x=X),y = Y,ntree = 1000,nodesize = 5)
+    names(newdata) = names(qrf_model$forest$xlevels)
+    quantile_estimates_0.95 <- predict(qrf_model, newdata = data.frame(newdata), what = (1+desired_coverage)/2)
+    quantile_estimates_0.5 <- predict(qrf_model, newdata = data.frame(newdata), what = 0.5)
+    quantile_estimates_0.05 <- predict(qrf_model, newdata = data.frame(newdata), what = (1-desired_coverage)/2)
+  }
+  
+  
+  
+  for(i in 1:length(quantile_estimates_0.95)){
+    quantile_estimates_0.95[i]= max(quantile_estimates_0.95[i], quantile_estimates_0.5[i])
+    quantile_estimates_0.05[i]= min(quantile_estimates_0.5[i], quantile_estimates_0.05[i])
+  }
+  
+  
+  prediction_quant0.95 = quantile_estimates_0.95
+  prediction_quant0.5 = quantile_estimates_0.5
+  prediction_quant0.05 = quantile_estimates_0.05
+  
+  
+  
+  #######################################
+  #######################################
+  #############Calibration###############
+  #######################################
+  #######################################
+  X = X_calib; Y = Y_calib
+  n=length(Y);
+  
+  #CQR Multiplicative
+  estimate_gamma_multiplicative = function(f=prediction_quant0.5){
+    l =  (prediction_quant0.5 - prediction_quant0.05)
+    u =  (prediction_quant0.95- prediction_quant0.5)
+    
+    score = c()
+    for(i in 1:n){
+      index =  index_sequences[i]
+      s = max(    (f[index] - Y[i])/(l[index]),  
+                  (Y[i] - f[index])/(u[index]) )
+      score = c(score, s)
+    }
+    gamma = quantile(score, desired_coverage)
+    return(gamma)
+  }
+  
+  #CQR Additive
+  estimate_gamma_additive = function(){
+    l =  prediction_quant0.05
+    u =  prediction_quant0.95
+    
+    score = c()
+    for(i in 1:n){
+      index =  index_sequences[i]
+      s = max(    l[index] - Y[i],  
+                  Y[i] - u[index] )
+      score = c(score, s)
+    }
+    gamma = quantile(score, desired_coverage)
+    return(gamma)
+  }
+  
+  #Naive
+  estimate_gamma_for_naive_intervals = function(f=prediction_quant0.5){
+    score = c()
+    for(i in 1:n){
+      index = index_sequences[i]
+      s = abs(f[index] - Y[i])
+      score = c(score, s)
+    }
+    gamma = quantile(score, desired_coverage)
+    return(gamma)
+  }
+  
+  if(CQR_type == 'multiplicative'){
+    gamma_CQR = estimate_gamma_multiplicative(f=prediction_quant0.5)
+    lower = prediction_quant0.5 - gamma_CQR*(prediction_quant0.5 - prediction_quant0.05)
+    upper = prediction_quant0.5 + gamma_CQR*(prediction_quant0.95- prediction_quant0.5)
+  }
+  if(CQR_type == 'additive'){
+    gamma_CQR = estimate_gamma_additive()
+    lower = prediction_quant0.5 - gamma_CQR
+    upper = prediction_quant0.5 + gamma_CQR
+  }
+  if(CQR_type == 'naive'){
+    gamma_naive = estimate_gamma_for_naive_intervals(f=prediction_quant0.5)
+    lower = prediction_quant0.5 - gamma_naive
+    upper = prediction_quant0.5 + gamma_naive
+  }
+  
+  
+  
+  n=length(data_original$Y)
+  if(!is.null(new_points)){
+    m=length(new_points$X1)
+    prediction_f = prediction_quant0.5[(n+1):(n+m)]
+    lower = lower[(n+1):(n+m)]
+    upper = upper[(n+1):(n+m)]
+    my_sequence = my_sequence[(n+1):(n+m),]
+  }
+  if(sink.number()!=0) sink()#Printing to console is back
+  
+  
+  
+  return(list(f_hat = prediction_f,
+              lower = lower, 
+              upper = upper,
+              my_sequence = my_sequence))
+}
+
+
+CW_rho_intervals_old = function(estimate0, estimate1, CATE = NULL, rho) {
+  rho_distance = function(x, y, rho)return(sqrt(x^2 + y^2 - 2*rho*x*y))
+  CI_addition = function(x, rho) return( x*(1+rho)/2)
+  
+  prediction_f0 = estimate0$f_hat
+  lower0 = estimate0$lower
+  upper0 = estimate0$upper
+  lower_u0 = prediction_f0 - estimate0$lower 
+  upper_u0 = estimate0$upper - prediction_f0
+  my_sequence0 = estimate0$my_sequence
+  
+  # Extract second estimate details
+  prediction_f1 = estimate1$f_hat
+  lower1 = estimate1$lower
+  upper1 = estimate1$upper
+  lower_u1 = prediction_f1 - estimate1$lower 
+  upper_u1 = estimate1$upper - prediction_f1
+  my_sequence1 = estimate1$my_sequence
+  
+  #combine sequences: if univariate then just sort and unique
+  if(is.null(ncol(my_sequence0)))my_sequence = sort(unique(c(my_sequence0, my_sequence1)))
+  if(!is.null(ncol(my_sequence0)))my_sequence = unique(rbind(my_sequence0, my_sequence1)) 
+  
+  
+  
+  
+  
+  
+  if(is.null(CATE)){CATE = prediction_f1 - prediction_f0} #We use simple t-estimator unless specificed otherwise
+  
+  # Calculate prediction interval for ITE
+  lower_ITE = CATE - rho_distance(lower_u0, upper_u1, rho)
+  upper_ITE = CATE + rho_distance(upper_u0, lower_u1, rho)
+  
+  return(list(my_sequence = my_sequence, lower_ITE = lower_ITE, upper_ITE = upper_ITE))
+}
+
+
+
+
+rho_used = -1
+data = data_generating_process_1D(500, rho = rho_used, constant_propensity = TRUE, sigma_2 = 4)
+new_points = data.frame(X1 = seq(min(data$X), max(data$X), 0.01))
+
+data0 = data[data$treatment==0,]
+X_untreated = data.frame(X1 = data0$X); Y_untreated = data0$Y_obs
+estimate0 = CQR(X_untreated, Y_untreated, new_points, desired_coverage = 0.9, train_calib_split = 0.8)
+
+data1 = data[data$treatment==1,]
+X_treated = data.frame(X1 = data1$X); Y_treated = data1$Y_obs
+estimate1 = CQR(X_treated, Y_treated, new_points, desired_coverage = 0.9, train_calib_split = 0.8)
+
+ITE_combo = CW_rho_intervals_old(estimate0, estimate1, rho = rho_used)
+Lei = Lei_ITE(X = data$X, Y = data$Y_obs, T = data$treatment, new_points = new_points, exact = TRUE)
+Lei2 = Lei_ITE(X = data$X, Y = data$Y_obs, T = data$treatment, new_points = new_points, exact = FALSE)
+
+dfLei <- data.frame(X = Lei$new_points, lower = Lei$lower, upper = Lei$upper, method = "Lei exact")
+dfLei2 <- data.frame(X = Lei2$new_points, lower = Lei2$lower, upper = Lei2$upper, method = "Lei inexact")
+df_ITE_points <- data.frame(X = data$X, ITE = data$Y1 - data$Y0, method = "True ITE")
+df_green <- data.frame(
+  X = estimate0$my_sequence,
+  diff = estimate1$f_hat - estimate0$f_hat
+)
+
+
+df0 <- data.frame(X = estimate0$my_sequence, mean = estimate0$f_hat, group = "Untreated")
+df1 <- data.frame(X = estimate1$my_sequence, mean = estimate1$f_hat, group = "Treated")
+
+
+
+
+
+build_plot_panel <- function(data, new_points, estimate0, estimate1, ITE_combo, rho_used) {
+  df0 <- data.frame(X = estimate0$my_sequence, mean = estimate0$f_hat, group = "Untreated")
+  df1 <- data.frame(X = estimate1$my_sequence, mean = estimate1$f_hat, group = "Treated")
+  dfITE <- data.frame(X = ITE_combo$my_sequence, lower = ITE_combo$lower_ITE, upper = ITE_combo$upper_ITE, method = "CW intervals")
+  df_diff <- data.frame(X = estimate0$my_sequence, diff = estimate1$f_hat - estimate0$f_hat, method = "CATE")
+  df_ITE_points <- data.frame(X = data$X, ITE = data$Y1 - data$Y0, method = "True ITE")
+  
+  title_expr <- bquote(CW(rho) ~ "intervals when" ~ rho == .(rho_used))
+  
+  ggplot() +
+    geom_point(data = data, aes(x = X, y = Y_obs, color = factor(treatment, levels = c(0, 1), labels = c("Untreated", "Treated"))), alpha = 0.4) +
+    geom_line(data = df0, aes(x = X, y = mean, color = group), size = 1) +
+    geom_line(data = df1, aes(x = X, y = mean, color = group), size = 1) +
+    geom_ribbon(data = dfITE, aes(x = X, ymin = lower, ymax = upper, fill = method), alpha = 0.3) +
+    geom_line(data = df_diff, aes(x = X, y = diff, color = method), size = 2) +
+    geom_point(data = df_ITE_points, aes(x = X, y = ITE, color = method), alpha = 0.4, size = 1.2) +
+    labs(title = title_expr, x = "X", y = "Y") +
+    coord_cartesian(ylim = c(-5, 30)) +
+    scale_color_manual(
+      name = NULL,
+      values = c("Untreated" = "steelblue", "Treated" = "tomato", "CATE" = "#32CD32", "True ITE" = "black")
+    ) +
+    scale_fill_manual(
+      name = NULL,
+      values = c("CW intervals" = "#228B22")
+    ) +
+      theme_minimal()
+}
+
+
+
+rho_values <- c(-1, 0, 1)
+plots <- list()
+
+for (i in seq_along(rho_values)) {
+  rho_used <- rho_values[i]
+  data = data_generating_process_1D(500, rho = rho_used, constant_propensity = TRUE, sigma_2 = 4)
+  new_points = data.frame(X1 = seq(min(data$X), max(data$X), 0.01))
+  
+  data0 = data[data$treatment == 0, ]
+  data1 = data[data$treatment == 1, ]
+  
+  estimate0 = CQR(data.frame(X1 = data0$X), data0$Y_obs, new_points, desired_coverage = 0.9, train_calib_split = 0.8)
+  estimate1 = CQR(data.frame(X1 = data1$X), data1$Y_obs, new_points, desired_coverage = 0.9, train_calib_split = 0.8)
+  rho_used2 = rho_used; if (rho_used2 == 1) rho_used2 = 0.9
+  ITE_combo = CW_rho_intervals_old(estimate0, estimate1, rho = rho_used2)
+  
+  plots[[i]] <- build_plot_panel(data, new_points, estimate0, estimate1, ITE_combo, rho_used)
+}
+
+p4 <- ggplot(data, aes(x = X, y = Y_obs)) +
+  geom_point(data = subset(data, treatment == 0), aes(x = X, y = Y_obs),
+             color = "steelblue", alpha = 0.4, show.legend = FALSE) +
+  geom_point(data = subset(data, treatment == 1), aes(x = X, y = Y_obs),
+             color = "tomato", alpha = 0.4, show.legend = FALSE) +
+  geom_line(data = df0, aes(x = X, y = mean), color = "steelblue", size = 1, inherit.aes = FALSE) +
+  geom_line(data = df1, aes(x = X, y = mean), color = "tomato", size = 1, inherit.aes = FALSE) +
+  geom_ribbon(data = dfLei, aes(x = X, ymin = lower, ymax = upper, fill = method),
+              inherit.aes = FALSE, alpha = 0.3) +
+  geom_ribbon(data = dfLei2, aes(x = X, ymin = lower, ymax = upper, fill = method),
+              inherit.aes = FALSE, alpha = 0.3) +
+  geom_line(data = df_green, aes(x = X, y = diff), color = "#32CD32",
+            size = 2, inherit.aes = FALSE) +
+  geom_point(data = df_ITE_points, aes(x = X, y = ITE),
+             color = "black", alpha = 0.4, size = 1.2, show.legend = FALSE) +
+  labs(title = expression("Lei and Candés when " * rho == -1), x = "X", y = "Y") +
+  scale_fill_manual(name = NULL,
+                    values = c("Lei exact" = "#66C2A5", "Lei inexact" = "#1B4D3E")) +
+  coord_cartesian(ylim = c(-5, 30)) +
+  theme_minimal() +
+  theme(legend.position = c(0.03, 0.97), legend.justification = c("left", "top"))
+
+
+
+final_plot <- (plots[[1]] | plots[[2]]) / (plots[[3]] | p4) +
+  plot_layout(guides = "collect") & theme(legend.position = "bottom")
+
+print(final_plot)
+
+#save as pdf
+ggsave("Picture_Rho_effect_1D.pdf", final_plot, width = 9, height = 6, units = "in", dpi = 300)
+
+
+
+
+
+
+
+
+
+
