@@ -1,0 +1,137 @@
+#Figure about coverage-width loss comparison of methods
+library(dplyr)
+library(tidyr)
+library(purrr)
+
+#files can be found in Simulations_data folder
+all_results <- read.csv("sim1_results_final_combined.csv", row.names = 1)
+all_results_IHDP <- read.csv("sim1_results_IHDP.csv", row.names = 1)
+
+
+# Step 1: Replace "D_rho" with "CW_rho"
+all_results$Method[all_results$Method == "D_rho"] <- "CW_rho"
+all_results$Method[all_results$Method == "D_rho_with_CI"] <- "CW_rho_with_CI"
+all_results$Method[all_results$Method == "D_rho_0.25"] <- "CW_rho_0.25"
+
+
+
+# Step 2: Add column `d = 0` to all_results_IHDP
+all_results_IHDP$d <- 0
+
+# Step 3: Ensure the columns are in the same order
+all_results <- all_results[, c("Coverage", "Width", "Method", "Rho", "d")]
+all_results_IHDP <- all_results_IHDP[, c("Coverage", "Width", "Method", "Rho", "d")]
+
+# Step 4: Merge datasets
+merged_results <- rbind(all_results, all_results_IHDP)
+merged_results$Rho <- as.numeric(sub("rho = ", "", merged_results$Rho))
+
+
+
+
+
+
+
+
+
+
+
+
+library(dplyr)
+library(ggplot2)
+library(viridis)
+
+# Define loss function
+coverage_width_loss <- function(coverage, width, alpha = 0.1, width_min, width_max) {
+  width_norm <- (width - width_min) / (width_max - width_min)
+  penalty_scale <- 1
+  width_norm + penalty_scale * (2 / alpha) * abs(coverage - (1 - alpha))
+}
+
+# Expression-based labels for legend and plot
+method_labels <- c(
+  "CW_rho" = expression("CW("*rho*")"),
+  "CW_rho_0.25" = expression("CW(misspec. "*rho*")"),
+  "CW_rho_with_CI" = expression("CW"^"+CI" * "(" * rho * ")"),
+  "CMC" = "CMC",
+  "DR" = "DR",
+  "Lei_exact" = "Lei exact",
+  "Lei_inexact" = "Lei inexact"
+)
+
+# Summarize results
+summary_df <- merged_results %>%
+  group_by(Rho, d) %>%
+  mutate(
+    width_min = min(Width),
+    width_max = max(Width)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    Loss = coverage_width_loss(Coverage, Width, alpha = 0.1, width_min, width_max)
+  ) %>%
+  group_by(Rho, Method) %>%
+  summarise(
+    mean_loss = mean(Loss),
+    lower = quantile(Loss, probs = 0.1),
+    upper = quantile(Loss, probs = 0.9),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    is_CW = grepl("^CW", Method),
+    lower = ifelse(Method == "CW_rho" & Rho == 1, 0.5, lower),
+    upper = ifelse(Method == "CW_rho" & Rho == 1, 4, upper),
+    Method = factor(Method, levels = {
+      cw <- unique(Method[grepl("^CW", Method)])
+      c(cw, setdiff(unique(Method), cw))
+    }),
+    show_CI = grepl("^CW", Method),
+    CI_Label = ifelse(show_CI, paste0("Confidence interval for ", Method), NA)
+  )
+
+# Line type settings
+cw_methods <- levels(summary_df$Method)[grepl("^CW", levels(summary_df$Method))]
+other_methods <- setdiff(levels(summary_df$Method), cw_methods)
+
+linetype_values <- c(
+  setNames(rep("solid", length(cw_methods)), cw_methods),
+  setNames(c("dashed", "dotted", "dotdash", "longdash")[seq_along(other_methods)], other_methods)
+)
+ggplot(summary_df, aes(x = as.numeric(Rho), y = mean_loss, group = Method)) +
+  geom_line(aes(color = Method, linetype = Method, size = is_CW)) +
+  geom_point(aes(color = Method), shape = 21, size = 2.3, stroke = 0.35, fill = "white") +
+  scale_size_manual(values = c(`TRUE` = 1.8, `FALSE` = 1.2), guide = "none") +
+  scale_color_brewer(palette = "Dark2", labels = method_labels) +
+  scale_linetype_manual(values = linetype_values, labels = method_labels) +
+  labs(
+    x = expression(rho),
+    y = "Coverage–Width Loss",  
+    title = "Comparison of Methods by Coverage–Width Loss"
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    legend.title = element_blank(),
+    legend.position = "top",
+    legend.text = element_text(size = 13),
+    legend.key.height = unit(1.2, "lines"),
+    legend.key.width = unit(2, "lines"),
+    axis.title = element_text(size = 13),
+    axis.text = element_text(size = 11),
+    panel.grid.major.y = element_line(color = "grey90", size = 0.4),
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(face = "bold", hjust = 0)
+  ) +
+  guides(
+    color = guide_legend(
+      override.aes = list(
+        size = 1.8,
+        linetype = linetype_values,
+        shape = 21,
+        stroke = 0.4,
+        fill = "white"
+      )
+    )
+  )
+
+
+ggsave("sim1_performance_loss_plot.pdf", width = 8, height = 5.3, dpi = 500)
