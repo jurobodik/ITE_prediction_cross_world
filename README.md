@@ -1,7 +1,7 @@
 # Cross-World Assumption and Refining Prediction Intervals for Individual Treatment Effects
 
 [![R](https://img.shields.io/badge/R-4.2+-blue.svg)](https://www.r-project.org/)
-[arXiv](https://arxiv.org/abs/2507.12581)
+[![DOI](https://zenodo.org/badge/DOI/2507.12581.svg)](https://arxiv.org/abs/2507.12581)
 
 We develop methods for constructing **valid and informative prediction intervals for individual treatment effects (ITE)** for new units not within the study, under assumptions on the **cross-world correlation parameter ρ(x) = corr(Y(1), Y(0) | X = x)**.
 
