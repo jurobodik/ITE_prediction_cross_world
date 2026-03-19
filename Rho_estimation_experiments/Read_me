@@ -1,10 +1,12 @@
-In this folder, there are 4 files: 
+In this folder, there are 5 files: 
 
 1) rho_estimation.R contains the main function for estimation of rho using auxiliarly covariates Z
 
 2) TWINS_rho.R contains detailed code for estimation of rho, hat(rho) and tilde(hat(rho)) in this dataset
 
 3) sim_rho_est_high_dim and 4) sim_rho_estimation_univariate contain details about the experiments regarding  hat(rho) estimation in the appendix of the manuscript. 
+
+5) cross-over_dataset.R contains the uploading of the cross-over dataset from (Schütz et al., 2020), and computing the correlation between both potential outcomes there.
 
 
 
