@@ -6,6 +6,7 @@ library(tidyr);
 library(readr)
 
 url <- "https://raw.githubusercontent.com/Helmut01/replicateBE/master/inst/extdata/DS01.csv"
+#url <- "https://raw.githubusercontent.com/Helmut01/replicateBE/master/inst/extdata/DS02.csv"
 
 read_csv(url, skip = 2, show_col_types = FALSE) %>%
   mutate(subject = as.character(subject), treatment = as.character(treatment), logPK = as.numeric(logPK)) %>%
