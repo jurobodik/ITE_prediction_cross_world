@@ -82,7 +82,10 @@ print("Lower:", result["lower"])
 print("Upper:", result["upper"])
 ```
 ## How to choose ρ? 
-Ask: “What proportion of the total noise variance can be attributed to hidden components affecting both potential outcomes similarly? ” In the additive model 
+
+One way is using auxiliary covariates Z - see folder 'Rho_estimation_experiments' 
+
+Another way uses domain reasoning. Ask: “What proportion of the total noise variance can be attributed to hidden components affecting both potential outcomes similarly? ” In the additive model 
 
 Y(1) = μ₁(X) + H + ε̃₁  
 Y(0) = μ₀(X) + H + ε̃₀  
