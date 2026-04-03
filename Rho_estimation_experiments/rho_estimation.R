@@ -1,3 +1,44 @@
+# # # # # Rho estimation
+
+# # # # # Example
+# n <- 1000
+# rho_epsilon <- 0.5
+# gamma_Z = 1.5 #gamma
+# e0 <- rnorm(n); e1 <- rho_epsilon*e0 + sqrt(1-rho_epsilon^2)*rnorm(n)   # Corr(e0,e1)=rho_true
+
+# X1 <- rnorm(n); Z1 <- rnorm(n); Z2 <- rnorm(n)
+
+# tilde_e0 = gamma_Z*Z1  + e0;
+# tilde_e1 = gamma_Z*Z1  + e1;
+
+# Y0 <- 0.6*X1   + tilde_e0
+# Y1 <- 0.8*X1   + tilde_e1
+
+# rho_true = cor(tilde_e0, tilde_e1)
+
+
+# T <- rbinom(n, 1, 0.5); Y <- ifelse(T==1, Y1, Y0)
+# dat <- data.frame(Y=Y, T=T, X1=X1, Z1=Z1, Z2=Z2)
+
+
+# # # # # Estimate rho_L(x)
+# out <- estimate_rho_L(
+#   data = dat,
+#   y_col = "Y",
+#   t_col = "T",
+#   x_cols = c("X1"),
+#   z_cols = c("Z1"),
+#   mu_method = "lm",   # 'ranger' or 'lm'
+#   x_eval = NULL, 
+#   ci=FALSE
+# )
+
+# # # # # Inspect results
+# out$rho_L_mean;out$rho_L_var
+# out$rho_tilde_L_mean;out$rho_tilde_L_var
+# rho_true
+
+
 estimate_rho_L <- function(
     data,
     y_col = "Y",
@@ -483,41 +524,5 @@ estimate_rho_L <- function(
 
 
 
-n <- 1000
-rho_epsilon <- 0.5
-gamma_Z = 1.5 #gamma
-e0 <- rnorm(n); e1 <- rho_epsilon*e0 + sqrt(1-rho_epsilon^2)*rnorm(n)   # Corr(e0,e1)=rho_true
-
-X1 <- rnorm(n); Z1 <- rnorm(n); Z2 <- rnorm(n)
-
-tilde_e0 = gamma_Z*Z1  + e0;
-tilde_e1 = gamma_Z*Z1  + e1;
-
-Y0 <- 0.6*X1   + tilde_e0
-Y1 <- 0.8*X1   + tilde_e1
-
-rho_true = cor(tilde_e0, tilde_e1)
-
-
-T <- rbinom(n, 1, 0.5); Y <- ifelse(T==1, Y1, Y0)
-dat <- data.frame(Y=Y, T=T, X1=X1, Z1=Z1, Z2=Z2)
-
-
-# Estimate rho_L(x)
-out <- estimate_rho_L(
-  data = dat,
-  y_col = "Y",
-  t_col = "T",
-  x_cols = c("X1"),
-  z_cols = c("Z1"),
-  mu_method = "lm",   # 'ranger' or 'lm'
-  x_eval = NULL, 
-  ci=FALSE
-)
-
-# Inspect results
-out$rho_L_mean;out$rho_L_var
-out$rho_tilde_L_mean;out$rho_tilde_L_var
-rho_true
 
 
