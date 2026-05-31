@@ -4,7 +4,8 @@
 # Estimate the lower bound rho_L(x) for the cross-world correlation rho(x)
 # using auxiliary covariates Z
 #
-# The function can also compute the more conservative bound rho_tilde_L(x),
+# The function can also compute the more conservative lower bound rho_tilde_L(x),
+# the corresponding upper bound rho_tilde_U(x),
 # and optional bootstrap-based confidence intervals.
 #
 # -----------------------------------------------------------------------------
@@ -44,10 +45,12 @@
 # #
 # # out$rho_L_mean
 # # out$rho_tilde_L_mean
+# # out$rho_tilde_U_mean
 # # rho_true
 # =============================================================================
 
 # library(ranger) #only if ranger is used
+# library(mgcv)   #only if gam is used
 estimate_rho_L <- function(
     data,
     y_col = "Y",
@@ -55,7 +58,7 @@ estimate_rho_L <- function(
     x_cols = c("X1"),
     z_cols = c("Z1"),
     x_eval = NULL,
-    mu_method = c("ranger", "lm"),
+    mu_method = c("ranger", "lm", "gam"),
     compute_B_L = TRUE,
     hA = 0.5,
     hSigma = 0.5,
@@ -227,6 +230,24 @@ estimate_rho_L <- function(
 
   base_rf_seed <- if (ranger_seed && !is.null(seed)) as.integer(seed) else NULL
 
+  make_gam_formula <- function(df) {
+    gam_terms <- vapply(setdiff(names(df), "Y"), function(v) {
+      x <- df[[v]]
+      if (is.numeric(x) || is.integer(x)) {
+        n_unique <- length(unique(x[!is.na(x)]))
+        if (n_unique >= 5L) {
+          paste0("s(", v, ", k = ", min(10L, n_unique - 1L), ")")
+        } else {
+          v
+        }
+      } else {
+        v
+      }
+    }, character(1))
+
+    as.formula(paste("Y ~", paste(gam_terms, collapse = " + ")), env = asNamespace("mgcv"))
+  }
+
   if (mu_method == "ranger") {
     if (!requireNamespace("ranger", quietly = TRUE)) {
       stop("Package `ranger` is required when mu_method = 'ranger'.")
@@ -294,6 +315,26 @@ estimate_rho_L <- function(
     } else {
       fit0 <- lm(fml, data = d0)
       fit1 <- lm(fml, data = d1)
+      pred_mu0_train <- as.numeric(predict(fit0, newdata = d0))
+      pred_mu1_train <- as.numeric(predict(fit1, newdata = d1))
+    }
+
+  } else if (mu_method == "gam") {
+    if (!requireNamespace("mgcv", quietly = TRUE)) {
+      stop("Package `mgcv` is required when mu_method = 'gam'.")
+    }
+
+    fml0 <- make_gam_formula(d0)
+    fml1 <- make_gam_formula(d1)
+
+    if (is_binary) {
+      fit0 <- mgcv::gam(fml0, data = d0, family = binomial(), method = "REML")
+      fit1 <- mgcv::gam(fml1, data = d1, family = binomial(), method = "REML")
+      pred_mu0_train <- as.numeric(predict(fit0, newdata = d0, type = "response"))
+      pred_mu1_train <- as.numeric(predict(fit1, newdata = d1, type = "response"))
+    } else {
+      fit0 <- mgcv::gam(fml0, data = d0, method = "REML")
+      fit1 <- mgcv::gam(fml1, data = d1, method = "REML")
       pred_mu0_train <- as.numeric(predict(fit0, newdata = d0))
       pred_mu1_train <- as.numeric(predict(fit1, newdata = d1))
     }
@@ -421,6 +462,7 @@ estimate_rho_L <- function(
 
   B_L_hat <- if (compute_B_L) numeric(nxe) else NULL
   rho_tilde_L_hat <- if (compute_B_L) numeric(nxe) else NULL
+  rho_tilde_U_hat <- if (compute_B_L) numeric(nxe) else NULL
 
   for (j in seq_len(nxe)) {
     x0 <- x_eval_mat[j, ]
@@ -447,6 +489,7 @@ estimate_rho_L <- function(
       BLj <- wmean(sqrt(s0 * s1), wA)
       B_L_hat[j] <- BLj
       rho_tilde_L_hat[j] <- max(-1, min(1, (Aj - BLj) / denom))
+      rho_tilde_U_hat[j] <- max(-1, min(1, (Aj + BLj) / denom))
     }
   }
 
@@ -466,6 +509,9 @@ estimate_rho_L <- function(
     out$rho_tilde_L_hat <- rho_tilde_L_hat
     out$rho_tilde_L_mean <- mean(rho_tilde_L_hat, na.rm = TRUE)
     out$rho_tilde_L_var <- var(rho_tilde_L_hat, na.rm = TRUE)
+    out$rho_tilde_U_hat <- rho_tilde_U_hat
+    out$rho_tilde_U_mean <- mean(rho_tilde_U_hat, na.rm = TRUE)
+    out$rho_tilde_U_var <- var(rho_tilde_U_hat, na.rm = TRUE)
   }
 
   # ---------------------------------------------------------------------------
@@ -484,6 +530,7 @@ estimate_rho_L <- function(
 
       rho_boot <- matrix(NA_real_, nrow = n_boot, ncol = nxe)
       rho_tilde_boot <- if (compute_B_L) matrix(NA_real_, nrow = n_boot, ncol = nxe) else NULL
+      rho_tilde_U_boot <- if (compute_B_L) matrix(NA_real_, nrow = n_boot, ncol = nxe) else NULL
 
       for (b in seq_len(n_boot)) {
         b0 <- sample(idx0, length(idx0), replace = TRUE)
@@ -508,7 +555,10 @@ estimate_rho_L <- function(
         )
 
         rho_boot[b, ] <- est_b$rho_L_hat
-        if (compute_B_L) rho_tilde_boot[b, ] <- est_b$rho_tilde_L_hat
+        if (compute_B_L) {
+          rho_tilde_boot[b, ] <- est_b$rho_tilde_L_hat
+          rho_tilde_U_boot[b, ] <- est_b$rho_tilde_U_hat
+        }
       }
 
       zmat <- apply(rho_boot, 2, fisher_z)
@@ -521,11 +571,19 @@ estimate_rho_L <- function(
         z2_lo <- apply(zmat2, 2, quantile, probs = alpha, na.rm = TRUE, names = FALSE)
         z2_hi <- apply(zmat2, 2, quantile, probs = 1 - alpha, na.rm = TRUE, names = FALSE)
         out$rho_tilde_L_ci <- cbind(lower = inv_fisher_z(z2_lo), upper = inv_fisher_z(z2_hi))
+
+        zmat3 <- apply(rho_tilde_U_boot, 2, fisher_z)
+        z3_lo <- apply(zmat3, 2, quantile, probs = alpha, na.rm = TRUE, names = FALSE)
+        z3_hi <- apply(zmat3, 2, quantile, probs = 1 - alpha, na.rm = TRUE, names = FALSE)
+        out$rho_tilde_U_ci <- cbind(lower = inv_fisher_z(z3_lo), upper = inv_fisher_z(z3_hi))
       }
 
       if (store_boot) {
         out$rho_L_boot <- rho_boot
-        if (compute_B_L) out$rho_tilde_L_boot <- rho_tilde_boot
+        if (compute_B_L) {
+          out$rho_tilde_L_boot <- rho_tilde_boot
+          out$rho_tilde_U_boot <- rho_tilde_U_boot
+        }
       }
     }
 
@@ -533,6 +591,7 @@ estimate_rho_L <- function(
       n <- nrow(data)
       rho_boot <- matrix(NA_real_, nrow = n_boot, ncol = nxe)
       rho_tilde_boot <- if (compute_B_L) matrix(NA_real_, nrow = n_boot, ncol = nxe) else NULL
+      rho_tilde_U_boot <- if (compute_B_L) matrix(NA_real_, nrow = n_boot, ncol = nxe) else NULL
 
       for (b in seq_len(n_boot)) {
         g <- rexp(n, rate = 1)
@@ -562,6 +621,7 @@ estimate_rho_L <- function(
 
             BLj <- wmean(sqrt(s0 * s1), wA)
             rho_tilde_boot[b, j] <- max(-1, min(1, (Aj - BLj) / denom))
+            rho_tilde_U_boot[b, j] <- max(-1, min(1, (Aj + BLj) / denom))
           }
         }
       }
@@ -576,11 +636,19 @@ estimate_rho_L <- function(
         z2_lo <- apply(zmat2, 2, quantile, probs = alpha, na.rm = TRUE, names = FALSE)
         z2_hi <- apply(zmat2, 2, quantile, probs = 1 - alpha, na.rm = TRUE, names = FALSE)
         out$rho_tilde_L_ci <- cbind(lower = inv_fisher_z(z2_lo), upper = inv_fisher_z(z2_hi))
+
+        zmat3 <- apply(rho_tilde_U_boot, 2, fisher_z)
+        z3_lo <- apply(zmat3, 2, quantile, probs = alpha, na.rm = TRUE, names = FALSE)
+        z3_hi <- apply(zmat3, 2, quantile, probs = 1 - alpha, na.rm = TRUE, names = FALSE)
+        out$rho_tilde_U_ci <- cbind(lower = inv_fisher_z(z3_lo), upper = inv_fisher_z(z3_hi))
       }
 
       if (store_boot) {
         out$rho_L_boot <- rho_boot
-        if (compute_B_L) out$rho_tilde_L_boot <- rho_tilde_boot
+        if (compute_B_L) {
+          out$rho_tilde_L_boot <- rho_tilde_boot
+          out$rho_tilde_U_boot <- rho_tilde_U_boot
+        }
       }
     }
   }
