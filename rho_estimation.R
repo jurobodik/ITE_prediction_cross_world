@@ -5,7 +5,7 @@
 # using auxiliary covariates Z
 #
 # The function can also compute the more conservative lower bound rho_tilde_L(x),
-# the corresponding upper bound rho_tilde_U(x),
+# the corresponding upper bound rho_tilde_U(x) = A(x) + B(x)/sqrt(sigma0(x)sigma1(x)),
 # and optional bootstrap-based confidence intervals.
 #
 # -----------------------------------------------------------------------------
