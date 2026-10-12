@@ -10,40 +10,34 @@
 #   * bioavailability crossover studies not contained in replicateBE,
 #   * one animal switchback trial,
 #   * within-subject behavioural / educational / exercise experiments.
-#
-# Data are downloaded from the read-only GitHub mirrors of the CRAN packages
-# (https://github.com/cran/<package>), pinned to fixed commits.
 
-# Inclusion criteria (fixed before any correlation was computed):
-#   (i)   each unit receives both a control/reference and an active condition,
-#         either sequentially (crossover / switchback) or simultaneously on two
-#         parts of the same unit (split-body);
-#   (ii)  the condition is an intervention assigned by the investigator
-#         (not a measurement method, a naturally occurring exposure, or time);
-#   (iii) real (non-simulated, non-hypothetical) individual-level data from a
-#         citable source that do not duplicate a replicateBE dataset;
-#   (iv)  at least 10 units with both outcomes observed.
-# Screened but excluded candidates are listed at the bottom of this file.
-#
-# Analysis (as in cross-over_dataset.R):
-#   * construct unit-level pairs (Y0, Y1); replicate measurements of the same
-#     condition are averaged within unit, repeated post-dose measurements over
-#     time are averaged (pre-dose / baseline measurements are discarded);
-#   * pharmacokinetic exposure endpoints (AUC) on log scale, all others raw;
-#   * Pearson correlation with Fisher-z 95% confidence interval;
-#   * multi-arm studies: every active arm versus the control arm;
-#   * binary outcome (diabetic retinopathy): Pearson (phi) correlation of
-#     blindness within a pre-specified horizon of 24 months;
-#   * robustness: Spearman correlation, and Pearson after removing period
-#     effects (estimated within subject) whenever period labels are available.
+# Reproduces
+#   * Table "tab_cross_over_appendix"    : 30 replicateBE bioequivalence datasets
+#   * Table "tab_additional_within_unit" : 19 additional studies (24 contrasts)
+#   * Table "tab_conditional_rho"        : conditional correlations rho(x)
+# and all numbers quoted in the text about these studies (Section 2 and the
+# appendix "Cross-over, split-body, and within-subject studies").
+
+# Requirements: R (>= 4.1) with the packages dplyr, tidyr and readr, and an
+# internet connection. All data are downloaded from GitHub, pinned to fixed
+# commits so that the results cannot change:
+#   * replicateBE reference datasets: github.com/Helmut01/replicateBE
+#   * all other datasets: read-only GitHub mirrors of CRAN packages
+#     (github.com/cran/<package>).
 ###############################################################################
 
-library(dplyr)
-library(tidyr)
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tidyr)
+  library(readr)
+})
+if (!exists("save_tables")) save_tables <- FALSE
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+# =============================================================================
+# 0. Helpers
+# =============================================================================
+
+replicateBE_commit <- "08d523145bb6a4c44b7e3f0890cf5f6fd4cd2567"
 
 mirror_commit <- c(
   HistData   = "92bbf20c9cd4cf88ff212f6ae0cffcd0e2e06855",
@@ -63,7 +57,7 @@ mirror_commit <- c(
   PairedData = "7076f81a19dde00a613727ea2a6f7679b782f9eb"
 )
 
-# Download data/<file> of a CRAN package from its GitHub mirror and load it.
+# Download data/<file> of a CRAN package from its pinned GitHub mirror and load it.
 load_cran_data <- function(pkg, file, object = sub("\\.(rda|RData)$", "", file)) {
   url <- sprintf("https://raw.githubusercontent.com/cran/%s/%s/data/%s",
                  pkg, mirror_commit[[pkg]], file)
@@ -78,25 +72,20 @@ load_cran_data <- function(pkg, file, object = sub("\\.(rda|RData)$", "", file))
   }
 }
 
-# Pearson correlation with Fisher-z CI (identical to cross-over_dataset.R),
-# plus the Spearman rank correlation as a robustness check.
+# Pearson correlation with Fisher-z 95% CI, plus Spearman rank correlation.
 paired_rho <- function(y0, y1) {
   ok <- is.finite(y0) & is.finite(y1)
   y0 <- y0[ok]; y1 <- y1[ok]
   n  <- length(y0)
   r  <- cor(y1, y0)
   se <- 1 / sqrt(n - 3)
-  tibble(
-    n        = n,
-    rho      = r,
-    ci_lower = tanh(atanh(r) - qnorm(0.975) * se),
-    ci_upper = tanh(atanh(r) + qnorm(0.975) * se),
-    spearman = cor(y1, y0, method = "spearman")
-  )
+  tibble(n = n, rho = r,
+         ci_lower = tanh(atanh(r) - qnorm(0.975) * se),
+         ci_upper = tanh(atanh(r) + qnorm(0.975) * se),
+         spearman = cor(y1, y0, method = "spearman"))
 }
 
-# Remove period main effects, estimated within unit from
-# y ~ unit + treatment + period (the standard crossover model).
+# Remove period main effects estimated within unit (model y ~ unit + trt + period).
 remove_period_effects <- function(d) {
   fit <- lm(y ~ factor(unit) + factor(trt) + factor(period), data = d)
   b <- coef(fit)
@@ -106,7 +95,7 @@ remove_period_effects <- function(d) {
   d$y - ifelse(key %in% names(b), b[key], 0)
 }
 
-# Average to one value per unit and condition, keep complete pairs.
+# Average to one value per unit and condition; keep complete pairs.
 unit_pairs <- function(d, control, active) {
   d %>%
     filter(trt %in% c(control, active), is.finite(y)) %>%
@@ -116,7 +105,7 @@ unit_pairs <- function(d, control, active) {
     filter(!is.na(.data[[control]]), !is.na(.data[[active]]))
 }
 
-# Long data (columns unit, trt, y and optionally period) -> one result row.
+# Long data (unit, trt, y [, period]) -> paired estimates (+ period-adjusted rho).
 rho_from_long <- function(d, control, active) {
   p <- unit_pairs(d, control, active)
   res <- paired_rho(p[[control]], p[[active]])
@@ -124,270 +113,418 @@ rho_from_long <- function(d, control, active) {
   if ("period" %in% names(d) && length(unique(d$period)) > 1) {
     d_adj <- d %>% filter(is.finite(y))
     d_adj$y <- remove_period_effects(d_adj)
-    p <- unit_pairs(d_adj, control, active)
-    res$rho_period_adj <- cor(p[[active]], p[[control]])
+    pa <- unit_pairs(d_adj, control, active)
+    res$rho_period_adj <- cor(pa[[active]], pa[[control]])
   }
   res
 }
 
-wide_to_long <- function(unit, y0, y1, control = "control", active = "active") {
+wide_to_long <- function(unit, y0, y1, control, active) {
   n_units <- length(unit)
-  tibble(unit = rep(unit, 2),
-         trt  = rep(c(control, active), each = n_units),
-         y    = c(y0, y1))
+  tibble(unit = rep(unit, 2), trt = rep(c(control, active), each = n_units), y = c(y0, y1))
 }
+
+r2 <- function(x) round(x, 2)
+r4 <- function(x) round(x, 4)
+
+# =============================================================================
+# 1. Thirty replicateBE bioequivalence datasets  (Table tab_cross_over_appendix)
+#    Subjects receive the reference (R) and test (T) formulation, possibly
+#    repeatedly; Y(0), Y(1) = log PK response under R and T, averaged within
+#    subject over replicate periods.
+# =============================================================================
+
+estimate_rho_ds <- function(ds_id) {
+  url <- sprintf("https://raw.githubusercontent.com/Helmut01/replicateBE/%s/inst/extdata/DS%02d.csv",
+                 replicateBE_commit, ds_id)
+  tmp <- file.path(tempdir(), sprintf("replicateBE_DS%02d.csv", ds_id))
+  if (!file.exists(tmp)) download.file(url, tmp, mode = "wb", quiet = TRUE)
+  # missing values are coded as "", "." or "NA" in the reference datasets
+  raw <- read_csv(tmp, comment = "#", na = c("", ".", "NA"), show_col_types = FALSE)
+  pairs <- raw %>%
+    mutate(subject = as.character(subject), treatment = as.character(treatment),
+           Y = if ("logPK" %in% names(.)) as.numeric(logPK) else log(as.numeric(PK))) %>%
+    filter(treatment %in% c("R", "T"), !is.na(Y)) %>%
+    group_by(subject, treatment) %>%
+    summarise(Y = mean(Y), .groups = "drop") %>%
+    pivot_wider(names_from = treatment, values_from = Y) %>%
+    filter(!is.na(R), !is.na(T))
+  bind_cols(tibble(dataset = sprintf("%02d", ds_id)), paired_rho(pairs$R, pairs$T))
+}
+
+# Origin of each dataset as documented in the replicateBE package
+# ("Measured": public-domain data of non-simulated origin; "Simulated": edited
+# or derived from simulated datasets).
+simulated_ids <- c(7, 8, 9, 12, 13, 14, 15, 18, 19, 20, 22, 25, 27, 29, 30)
+
+rho_tab_BE <- bind_rows(lapply(1:30, estimate_rho_ds)) %>%
+  mutate(type = ifelse(as.integer(dataset) %in% simulated_ids, "Simulated", "Measured")) %>%
+  arrange(desc(rho)) %>%
+  select(dataset, type, n, rho, ci_lower, ci_upper)
+
+# =============================================================================
+# 2. Nineteen additional studies  (Table tab_additional_within_unit)
+#    Inclusion criteria (fixed before any correlation was computed):
+#    (i) each unit receives both a control/reference and an active condition,
+#    sequentially or simultaneously on two parts of the same unit; (ii) the
+#    condition is assigned by the investigator; (iii) real (non-simulated)
+#    individual-level data from a citable source, not part of replicateBE;
+#    (iv) at least 10 units with both outcomes. Screened but excluded
+#    candidates are listed at the end of this file.
+#    Replicates of a condition are averaged within unit; repeated post-dose
+#    measurements are averaged (pre-dose values discarded); PK exposure
+#    endpoints are log-transformed; multi-arm studies: each active arm vs
+#    control.
+# =============================================================================
 
 results <- list()
-add_result <- function(study, domain, design, outcome, control, active, res) {
+add_result <- function(study, group, contrast, res) {
   results[[length(results) + 1]] <<- bind_cols(
-    tibble(study = study, domain = domain, design = design, outcome = outcome,
-           contrast = paste(active, "vs", control)), res)
+    tibble(study = study, group = group, contrast = contrast), res)
 }
 
-# ---------------------------------------------------------------------------
-# (A) Clinical crossover trials with placebo / no-treatment control
-# ---------------------------------------------------------------------------
+## Clinical crossover trials -------------------------------------------------
 
-## A1. Cushny & Peebles (1905): hours of sleep without hypnotic (control) and
-##     with three hyoscine/hyoscyamine hydrobromides; averages over nights.
-##     Patient 11 has no control observation.
+# Cushny & Peebles (1905): hours of sleep without (control) and with hypnotics.
 cp <- load_cran_data("HistData", "CushnyPeebles.RData")
 cp$unit <- seq_len(nrow(cp))
 cp_long <- cp %>% pivot_longer(-unit, names_to = "trt", values_to = "y")
 for (drug in c("L_hyoscyamine", "L_hyoscine", "DL_hyoscine"))
-  add_result("Cushny & Peebles (1905)", "Clinical", "within-patient, alternate nights",
-             "hours of sleep", "Control", drug, rho_from_long(cp_long, "Control", drug))
+  add_result("Cushny & Peebles (1905)", "Clinical", paste(drug, "vs none"),
+             rho_from_long(cp_long, "Control", drug))
 
-## A2. Ashina et al. (1999): NO-synthase inhibitor L-NMMA vs placebo in chronic
-##     tension-type headache; summed change of pain VAS from baseline.
-##     grp = 1: placebo first, grp = 2: active first.
+# Ashina et al. (1999): L-NMMA vs placebo, headache pain (VAS); grp 1 = placebo first.
 ash <- load_cran_data("ISwR", "ashina.txt.gz")
 ash$unit <- seq_len(nrow(ash))
 ash_long <- bind_rows(
   tibble(unit = ash$unit, trt = "placebo", y = ash$vas.plac,   period = ifelse(ash$grp == 1, 1, 2)),
   tibble(unit = ash$unit, trt = "L-NMMA",  y = ash$vas.active, period = ifelse(ash$grp == 1, 2, 1)))
-add_result("Ashina et al. (1999)", "Clinical", "2-period crossover",
-           "pain score (VAS change)", "placebo", "L-NMMA", rho_from_long(ash_long, "placebo", "L-NMMA"))
+add_result("Ashina et al. (1999)", "Clinical", "L-NMMA vs placebo",
+           rho_from_long(ash_long, "placebo", "L-NMMA"))
 
-## A3. Swain et al. (1990): high-fiber oat bran vs low-fiber wheat supplement;
-##     total serum cholesterol after each 6-week period.
+# Swain et al. (1990): oat bran vs low-fiber wheat, serum cholesterol.
 ob <- load_cran_data("Sleuth3", "case1602.rda")
 ob$unit <- seq_len(nrow(ob))
 ob_long <- bind_rows(
   tibble(unit = ob$unit, trt = "low fiber",  y = ob$LoFiber, period = ifelse(ob$Order == "LH", 1, 2)),
   tibble(unit = ob$unit, trt = "high fiber", y = ob$HiFiber, period = ifelse(ob$Order == "HL", 1, 2)))
-add_result("Swain et al. (1990)", "Clinical", "2-period crossover",
-           "serum cholesterol", "low fiber", "high fiber", rho_from_long(ob_long, "low fiber", "high fiber"))
+add_result("Swain et al. (1990)", "Clinical", "Oat bran vs low fiber",
+           rho_from_long(ob_long, "low fiber", "high fiber"))
 
-## A4. Chang et al. (1979): THC (marijuana) vs placebo during chemotherapy;
-##     number of vomiting and retching episodes (period labels not available).
+# Chang et al. (1979): THC vs placebo, vomiting episodes.
 mj <- load_cran_data("Sleuth3", "ex0432.rda")
-add_result("Chang et al. (1979)", "Clinical", "2-period crossover",
-           "vomiting episodes", "placebo", "THC",
-           rho_from_long(wide_to_long(mj$Subject, mj$Placebo, mj$Marijuana, "placebo", "THC"), "placebo", "THC"))
+add_result("Chang et al. (1979)", "Clinical", "THC vs placebo",
+           rho_from_long(wide_to_long(mj$Subject, mj$Placebo, mj$Marijuana, "placebo", "THC"),
+                         "placebo", "THC"))
 
-## A5. Bradstreet & Panebianco (2004): drug D vs placebo co-administered with an
-##     oral contraceptive; ethinyl estradiol AUC (log scale).
+# Bradstreet & Panebianco (2004): drug D vs placebo, log AUC of ethinyl estradiol.
 oc <- load_cran_data("Stat2Data", "Contraceptives.rda")
 oc_long <- tibble(unit = oc$ID, trt = as.character(oc$Treatment), y = log(oc$EE), period = oc$StudyPeriod)
-add_result("Bradstreet & Panebianco (2004)", "Clinical", "2-period crossover",
-           "log AUC of ethinyl estradiol", "Placebo", "Drug", rho_from_long(oc_long, "Placebo", "Drug"))
+add_result("Bradstreet & Panebianco (2004)", "Clinical", "Drug D vs placebo",
+           rho_from_long(oc_long, "Placebo", "Drug"))
 
-## A6. Littell et al. (2002): two asthma drugs (a, c) and placebo (p);
-##     FEV1 averaged over the 8 hourly post-dose measurements
-##     (the 11-h pre-dose baseline is discarded). Period labels not available.
-##     Within-patient pairing is supported by the data: baseline FEV1 of the
-##     same patient correlates 0.85-0.89 across the three treatment periods.
+# Littell et al. (2002): asthma drugs a, c vs placebo p; FEV1 averaged over 8 hours.
 fev <- load_cran_data("asbio", "asthma.rda")
 fev_long <- tibble(unit = fev$PATIENT, trt = as.character(fev$DRUG),
                    y = rowMeans(fev[, paste0("FEV1", 1:8, "H")]))
 for (drug in c("a", "c"))
-  add_result("Littell et al. (2002)", "Clinical", "3-period crossover",
-             "FEV1 (mean over 8 h)", "p", drug, rho_from_long(fev_long, "p", drug))
+  add_result("Littell et al. (2002)", "Clinical", paste("Drug", drug, "vs placebo"),
+             rho_from_long(fev_long, "p", drug))
 
-## A7. Jones & Kenward (2015): placebo (A) vs 20 mg (B) and 40 mg (C) of a test
-##     drug; diastolic blood pressure averaged over post-dose times (Time > 0).
+# Jones & Kenward (2015): 20 mg (B), 40 mg (C) vs placebo (A); post-dose diastolic BP.
 art <- load_cran_data("CrossCarry", "Arterial.rda")
 art_long <- art %>% filter(Time > 0) %>%
   group_by(unit = Subject, trt = Treatment, period = Period) %>%
   summarise(y = mean(Pressure), .groups = "drop")
 for (dose in c("B", "C"))
-  add_result("Jones & Kenward (2015)", "Clinical", "3-period crossover",
-             "diastolic blood pressure", "A", dose, rho_from_long(art_long, "A", dose))
+  add_result("Jones & Kenward (2015)", "Clinical", c(B = "20 mg vs placebo", C = "40 mg vs placebo")[[dose]],
+             rho_from_long(art_long, "A", dose))
 
-# ---------------------------------------------------------------------------
-# (B) Bioavailability crossover studies (not part of replicateBE)
-# ---------------------------------------------------------------------------
+## Bioavailability crossover studies -----------------------------------------
 
-## B1. Lawson (2015, Ch. 9): two-period crossover of an antifungal agent
-##     (treatments A, B); response 'pl' on its original scale.
+# Lawson (2015): two-period crossover of an antifungal agent (response 'pl').
 af <- load_cran_data("daewr", "antifungal.rda")
 af_long <- tibble(unit = af$Subject, trt = as.character(af$Treat), y = af$pl, period = af$Period)
-add_result("Lawson (2015), antifungal", "Bioavailability", "2-period crossover",
-           "drug response", "A", "B", rho_from_long(af_long, "A", "B"))
+add_result("Lawson (2015), antifungal", "Bioavailability", "Antifungal B vs A",
+           rho_from_long(af_long, "A", "B"))
 
-## B2. Lawson (2015, Ch. 9): extra-period (ABB/BAA) bioequivalence study;
-##     log scale, replicates of the same formulation averaged within subject.
+# Lawson (2015): extra-period (ABB/BAA) bioequivalence study, log scale.
 be <- load_cran_data("daewr", "bioequiv.rda")
 be_long <- tibble(unit = be$Subject, trt = as.character(be$Treat), y = log(be$y), period = be$Period)
-add_result("Lawson (2015), bioequivalence", "Bioavailability", "3-period crossover (ABB/BAA)",
-           "log PK response", "A", "B", rho_from_long(be_long, "A", "B"))
+add_result("Lawson (2015), bioequivalence", "Bioavailability", "Formulation B vs A",
+           rho_from_long(be_long, "A", "B"))
 
-# ---------------------------------------------------------------------------
-# (C) Split-body trials
-# ---------------------------------------------------------------------------
+## Split-body trials ---------------------------------------------------------
 
-## C1. Diabetic Retinopathy Study (Huster et al., 1989): in each patient one eye
-##     was randomized to laser photocoagulation, the fellow eye left untreated.
-##     Binary outcome Y = 1{blindness within tau months}; an eye contributes if
-##     its status at tau is known (event before tau, or followed beyond tau).
-##     Censoring is at the patient level (both eyes share censoring times).
+# Diabetic Retinopathy Study: one eye lasered, fellow eye untreated; blindness
+# within 24 months (status known if event before 24 months or followed beyond).
 drs <- load_cran_data("survival", "diabetic.rda")
-drs_binary <- function(tau) {
-  drs %>%
-    mutate(y = case_when(status == 1 & time <= tau ~ 1,
-                         time > tau ~ 0,
-                         TRUE ~ NA_real_),
-           trt = ifelse(trt == 1, "laser", "untreated")) %>%
-    select(unit = id, trt, y)
-}
-add_result("Diabetic Retinopathy Study", "Split-body", "paired eyes",
-           "blindness within 24 months", "untreated", "laser",
-           rho_from_long(drs_binary(24), "untreated", "laser"))
-drs_sensitivity <- bind_rows(lapply(c(12, 24, 36, 48), function(tau)
-  bind_cols(tibble(horizon_months = tau),
-            rho_from_long(drs_binary(tau), "untreated", "laser"))))
+drs_long <- drs %>%
+  mutate(y = case_when(status == 1 & time <= 24 ~ 1, time > 24 ~ 0, TRUE ~ NA_real_),
+         trt = ifelse(trt == 1, "laser", "untreated")) %>%
+  select(unit = id, trt, y)
+add_result("Diabetic Retinopathy Study", "Split-body", "Laser vs untreated",
+           rho_from_long(drs_long, "untreated", "laser"))
 
-## C2. Box, Hunter & Hunter (1978): shoe-sole materials A and B randomly
-##     allocated to the left/right foot of 10 boys; amount of wear.
+# Box, Hunter & Hunter (1978): sole materials A, B on the two feet of 10 boys.
 sh <- load_cran_data("MASS", "shoes.rda")
-add_result("Box, Hunter & Hunter (1978)", "Split-body", "paired feet",
-           "sole wear", "A", "B",
+add_result("Box, Hunter & Hunter (1978)", "Split-body", "Material B vs A",
            rho_from_long(wide_to_long(1:10, sh$A, sh$B, "A", "B"), "A", "B"))
 
-# ---------------------------------------------------------------------------
-# (D) Animal switchback trial
-# ---------------------------------------------------------------------------
+## Animal switchback trial ---------------------------------------------------
 
-## D1. Brandt (1938): two grain mixtures fed to 10 dairy cows in a
-##     T1-T2-T1 / T2-T1-T2 switchback design; milk yield (replicates averaged).
+# Brandt (1938): two grain rations, T1-T2-T1 / T2-T1-T2 switchback; milk yield.
 bs <- load_cran_data("agridat", "brandt.switchback.txt")
 bs_long <- tibble(unit = bs$cow, trt = bs$trt, y = bs$yield, period = bs$period)
-add_result("Brandt (1938)", "Animal", "3-period switchback",
-           "milk yield", "T1", "T2", rho_from_long(bs_long, "T1", "T2"))
+add_result("Brandt (1938)", "Animal", "Ration T2 vs T1", rho_from_long(bs_long, "T1", "T2"))
 
+## Within-subject experiments ------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# (E) Within-subject behavioural / educational / exercise experiments
-# ---------------------------------------------------------------------------
-
-## E1. Chard et al. (2019): supplementary drinking water vs normal school day
-##     in rural Mali; letter-cancellation score (visual attention).
+# Chard et al. (2019): drinking water vs usual school day; letter-cancellation
+# score LCS (= correct - incorrect, range -14 to 38).
 wa <- load_cran_data("CrossCarry", "Water.rda")
 wa_long <- tibble(unit = wa$ID, trt = ifelse(wa$Treatment == 1, "water", "control"),
                   y = wa$LCS, period = wa$Period)
-add_result("Chard et al. (2019)", "Behavioural", "2-period crossover",
-           "letter-cancellation score", "control", "water", rho_from_long(wa_long, "control", "water"))
+add_result("Chard et al. (2019)", "Within-subject", "Water vs usual day",
+           rho_from_long(wa_long, "control", "water"))
 
-## E2. Varao-Sousa & Kingstone (2015): live vs pre-recorded video lecture;
-##     proportion correct on the memory test (format and session coincide).
+# Varao-Sousa & Kingstone (2015): live vs video lecture; memory test score.
 ll <- load_cran_data("openintro", "lecture_learning.rda")
 ll_long <- tibble(unit = ll$student, trt = ll$method, y = ll$memory)
-add_result("Varao-Sousa & Kingstone (2015)", "Behavioural", "2-session within-subject",
-           "memory test score", "Live", "Video", rho_from_long(ll_long, "Live", "Video"))
+add_result("Varao-Sousa & Kingstone (2015)", "Within-subject", "Video vs live lecture",
+           rho_from_long(ll_long, "Live", "Video"))
 
-## E3. Lin et al. (2020): high-demand ('deplete') vs low-demand ('control')
-##     initial task, followed by a Stroop task; mean reaction time over all
-##     non-missing Stroop trials (the aggregation used in the afex vignettes).
+# Lin et al. (2020): high- vs low-demand task, mean Stroop reaction time over
+# all non-missing trials (aggregation as in the afex vignettes).
 st <- load_cran_data("afex", "stroop.rda")
 st_long <- st %>% filter(!is.na(rt)) %>%
   transmute(unit = as.character(pno), trt = as.character(condition), y = rt)
-add_result("Lin et al. (2020)", "Behavioural", "within-subject (4 studies)",
-           "Stroop reaction time", "control", "deplete", rho_from_long(st_long, "control", "deplete"))
-stroop_by_study <- bind_rows(lapply(levels(st$study), function(s)
-  bind_cols(tibble(study = s),
-            rho_from_long(st_long %>% filter(unit %in% as.character(st$pno[st$study == s])),
-                          "control", "deplete"))))
+add_result("Lin et al. (2020)", "Within-subject", "High vs low demand",
+           rho_from_long(st_long, "control", "deplete"))
 
-## E4. Steele (1998): standing on foam vs normal surface; CTSIB balance score
-##     (1-4) averaged over the three vision conditions and two replicates.
+# Steele (1998): foam vs normal surface; CTSIB balance score averaged over
+# vision conditions and replicates.
 ct <- load_cran_data("faraway", "ctsib.rda")
 ct_long <- tibble(unit = ct$Subject, trt = as.character(ct$Surface), y = ct$CTSIB)
-add_result("Steele (1998)", "Behavioural", "within-subject",
-           "balance score (CTSIB)", "norm", "foam", rho_from_long(ct_long, "norm", "foam"))
+add_result("Steele (1998)", "Within-subject", "Foam vs normal surface",
+           rho_from_long(ct_long, "norm", "foam"))
 
-## E5. de Lucas et al. (2000): 1500 m swim with vs without wetsuit, random order;
-##     maximal velocity (m/s).
+# de Lucas et al. (2000): wetsuit vs swimsuit; 1500 m swim velocity.
 ws <- load_cran_data("Lock5Data", "Wetsuits.rda")
-add_result("de Lucas et al. (2000)", "Behavioural", "within-subject, random order",
-           "swim velocity", "no wetsuit", "wetsuit",
+add_result("de Lucas et al. (2000)", "Within-subject", "Wetsuit vs swimsuit",
            rho_from_long(wide_to_long(seq_len(nrow(ws)), ws$NoWetsuit, ws$Wetsuit,
                                       "no wetsuit", "wetsuit"), "no wetsuit", "wetsuit"))
 
-## E6. Chipman, reported in Lawson (2015, Ch. 9): Williams crossover design with
-##     three sprint conditions (1, 2, 3); sprint time. No designated control,
-##     so condition 1 serves as the reference.
+# Chipman, in Lawson (2015): Williams design, three sprint conditions (1 = reference).
 cs <- load_cran_data("daewr", "chipman.rda")
 cs_long <- tibble(unit = cs$Subject, trt = as.character(cs$Treat), y = cs$Time, period = cs$Period)
 for (k in c("2", "3"))
-  add_result("Lawson (2015), sprint", "Behavioural", "3-period Williams crossover",
-             "sprint time", "1", k, rho_from_long(cs_long, "1", k))
+  add_result("Lawson (2015), sprint", "Within-subject", paste("Condition", k, "vs 1"),
+             rho_from_long(cs_long, "1", k))
 
-## E7. Wetherill (1972), via Preece (1982): blink rate while steering a pencil
-##     along a straight vs an oscillating track.
+# Wetherill (1972): blink rate, oscillating vs straight track.
 bl <- load_cran_data("PairedData", "Blink.rda")
-add_result("Wetherill (1972)", "Behavioural", "within-subject",
-           "blink rate", "Straight", "Oscillating",
+add_result("Wetherill (1972)", "Within-subject", "Oscillating vs straight",
            rho_from_long(wide_to_long(bl$Subject, bl$Straight, bl$Oscillating,
                                       "Straight", "Oscillating"), "Straight", "Oscillating"))
 
-# ---------------------------------------------------------------------------
-# Results
-# ---------------------------------------------------------------------------
-
 rho_tab_additional <- bind_rows(results)
 
-options(width = 200, pillar.sigfig = 3)
-print(rho_tab_additional %>% select(study, contrast, n, rho, ci_lower, ci_upper, spearman, rho_period_adj),
-      n = Inf)
+# =============================================================================
+# 3. Conditional correlations rho(x)  (Table tab_conditional_rho)
+#    Studies of Section 2 that record pre-treatment covariates X (the replicateBE
+#    datasets record none; post-treatment variables are not used).
+#    rho(x) is estimated by the partial correlation of Y(1) and Y(0) given X:
+#    the correlation of the residuals of arm-specific linear regressions on X,
+#    with Fisher-z CI on n - 3 - k degrees of freedom (k covariate columns).
+#    Strata: correlations within the levels of one covariate (baseline values
+#    split at the median).
+# =============================================================================
 
-cat("\nNumber of dataset entries:", n_distinct(rho_tab_additional$study),
-    " | number of treatment contrasts:", nrow(rho_tab_additional), "\n")
-cat("Contrasts with rho > 0   :", sum(rho_tab_additional$rho > 0), "\n")
-cat("Contrasts with rho > 0.33:", sum(rho_tab_additional$rho > 0.33), "\n")
-cat("Contrasts with rho > 0.5 :", sum(rho_tab_additional$rho > 0.5), "\n")
-cat("Median rho:", round(median(rho_tab_additional$rho), 3),
-    " | mean rho:", round(mean(rho_tab_additional$rho), 3), "\n")
-cat("Contrasts whose approximate Fisher-z 95% CI excludes 0:",
-    sum(rho_tab_additional$ci_lower > 0 | rho_tab_additional$ci_upper < 0), "\n")
+partial_rho <- function(y0, y1, X) {
+  X  <- as.data.frame(X)
+  ok <- is.finite(y0) & is.finite(y1) & complete.cases(X)
+  y0 <- y0[ok]; y1 <- y1[ok]; X <- X[ok, , drop = FALSE]
+  e0 <- resid(lm(y0 ~ ., data = cbind(y0 = y0, X)))
+  e1 <- resid(lm(y1 ~ ., data = cbind(y1 = y1, X)))
+  n  <- length(y0); k <- ncol(model.matrix(~ ., data = X)) - 1
+  r  <- cor(e1, e0); se <- 1 / sqrt(n - 3 - k)
+  tibble(n = n, k = k, rho_marginal = cor(y1, y0), rho_x = r,
+         ci_lower = tanh(atanh(r) - qnorm(0.975) * se),
+         ci_upper = tanh(atanh(r) + qnorm(0.975) * se))
+}
+strata_rho <- function(y0, y1, g) {
+  bind_rows(lapply(sort(unique(g)), function(l) {
+    i <- which(g == l)
+    bind_cols(tibble(stratum = as.character(l)), paired_rho(y0[i], y1[i]))
+  }))
+}
+median_split <- function(x) ifelse(x <= median(x), "below", "above")
 
-cat("\nDiabetic Retinopathy Study, sensitivity to the horizon:\n")
-print(drs_sensitivity)
-cat("\nLin et al. (2020), separately by study:\n")
-print(stroop_by_study)
+adj <- list(); strat <- list()
+add_cond <- function(study, contrast, covariates, y0, y1, X, g = NULL) {
+  adj[[length(adj) + 1]] <<- bind_cols(tibble(study = study, contrast = contrast,
+                                              covariates = covariates), partial_rho(y0, y1, X))
+  if (!is.null(g))
+    strat[[length(strat) + 1]] <<- bind_cols(tibble(study = study, contrast = contrast),
+                                             strata_rho(y0, y1, g))
+}
 
-# write.csv(rho_tab_additional, "rho_additional_datasets.csv", row.names = FALSE)
+# Swain et al. (1990): baseline cholesterol.
+add_cond("Swain et al. (1990)", "Oat bran vs low fiber", "Baseline cholesterol",
+         ob$LoFiber, ob$HiFiber, data.frame(baseline = ob$Baseline), median_split(ob$Baseline))
 
-# ---------------------------------------------------------------------------
+# Littell et al. (2002): baseline FEV1 (patient mean of the pre-dose values).
+fev_base <- fev %>% group_by(unit = PATIENT) %>% summarise(base = mean(BASEFEV1))
+for (drug in c("a", "c")) {
+  p <- unit_pairs(fev_long, "p", drug) %>% left_join(fev_base, by = "unit")
+  add_cond("Littell et al. (2002)", paste("Drug", drug, "vs placebo"), "Baseline FEV1",
+           p$p, p[[drug]], data.frame(base = p$base), median_split(p$base))
+}
+
+# Jones & Kenward (2015): baseline diastolic pressure (mean of pre-dose values).
+art_base <- art %>% filter(Time <= 0) %>% group_by(unit = Subject) %>% summarise(base = mean(Pressure))
+for (dose in c("B", "C")) {
+  p <- unit_pairs(art_long, "A", dose) %>% left_join(art_base, by = "unit")
+  add_cond("Jones & Kenward (2015)", c(B = "20 mg vs placebo", C = "40 mg vs placebo")[[dose]],
+           "Baseline pressure", p$A, p[[dose]], data.frame(base = p$base))
+}
+
+# Diabetic Retinopathy Study: type of diabetes, laser, treated side, age, risk scores.
+ret <- load_cran_data("survival", "retinopathy.rda")
+ret$Y <- ifelse(ret$status == 1 & ret$futime <= 24, 1, ifelse(ret$futime > 24, 0, NA))
+dd <- merge(ret[ret$trt == 1, c("id", "type", "laser", "eye", "age", "risk", "Y")],
+            ret[ret$trt == 0, c("id", "risk", "Y")], by = "id", suffixes = c("_t", "_c"))
+dd <- dd[!is.na(dd$Y_t) & !is.na(dd$Y_c), ]
+add_cond("Diabetic Retinopathy Study", "Laser vs untreated", "Type, laser, side, age, risk scores",
+         dd$Y_c, dd$Y_t, dd[, c("type", "laser", "eye", "age", "risk_t", "risk_c")],
+         as.character(dd$type))
+
+# Chard et al. (2019): school. The treatment sequence is determined by school
+# (A: control first, B: water first), so conditioning on school also removes
+# the period (practice) effect. Age and sex are missing for many pupils.
+wa_cov <- wa %>% group_by(unit = ID) %>% summarise(school = first(school))
+p <- unit_pairs(wa_long, "control", "water") %>% left_join(wa_cov, by = "unit")
+add_cond("Chard et al. (2019)", "Water vs usual day", "School",
+         p$control, p$water, data.frame(school = p$school), as.character(p$school))
+
+# Varao-Sousa & Kingstone (2015): gender (interest and motivation are post-treatment).
+ll_cov <- ll %>% group_by(unit = student) %>% summarise(gender = first(gender))
+p <- unit_pairs(ll_long, "Live", "Video") %>% left_join(ll_cov, by = "unit")
+add_cond("Varao-Sousa & Kingstone (2015)", "Video vs live lecture", "Gender",
+         p$Live, p$Video, data.frame(gender = p$gender), as.character(p$gender))
+
+# Lin et al. (2020): constituent study (1-4).
+st_cov <- st %>% distinct(unit = as.character(pno), study)
+p <- unit_pairs(st_long, "control", "deplete") %>% left_join(st_cov, by = "unit")
+add_cond("Lin et al. (2020)", "High vs low demand", "Study",
+         p$control, p$deplete, data.frame(study = p$study), as.character(p$study))
+
+# Steele (1998): sex, age, height, weight.
+ct_cov <- ct %>% group_by(unit = Subject) %>%
+  summarise(sex = first(Sex), age = first(Age), height = first(Height), weight = first(Weight))
+p <- unit_pairs(ct_long, "norm", "foam") %>% left_join(ct_cov, by = "unit")
+add_cond("Steele (1998)", "Foam vs normal surface", "Sex, age, height, weight",
+         p$norm, p$foam, p[, c("sex", "age", "height", "weight")], as.character(p$sex))
+
+# de Lucas et al. (2000): gender, swimmer type.
+add_cond("de Lucas et al. (2000)", "Wetsuit vs swimsuit", "Gender, swimmer type",
+         ws$NoWetsuit, ws$Wetsuit, ws[, c("Gender", "Type")])
+
+rho_tab_conditional <- bind_rows(adj)
+rho_tab_strata      <- bind_rows(strat)
+
+# =============================================================================
+# 4. Output: tables and numbers quoted in the text
+# =============================================================================
+
+options(width = 200, pillar.sigfig = 4)
+
+cat("\n==== Table tab_cross_over_appendix: 30 replicateBE datasets ====\n")
+print(as.data.frame(rho_tab_BE %>% mutate(across(c(rho, ci_lower, ci_upper), r4))), row.names = FALSE)
+cat("Average rho:", r4(mean(rho_tab_BE$rho)), "\n")
+
+cat("\n==== Table tab_additional_within_unit: 19 studies, 24 contrasts ====\n")
+print(as.data.frame(rho_tab_additional %>%
+        transmute(study, contrast, n, rho = r2(rho), ci_lower = r2(ci_lower),
+                  ci_upper = r2(ci_upper), spearman = r2(spearman))), row.names = FALSE)
+
+cat("\n==== Table tab_conditional_rho: conditional correlations rho(x) ====\n")
+strata_summary <- rho_tab_strata %>%
+  group_by(study, contrast) %>%
+  summarise(strata = if (n() > 2) paste0(sprintf("%.2f", min(rho)), "-", sprintf("%.2f", max(rho)))
+                     else paste(sprintf("%.2f", rho), collapse = ", "), .groups = "drop")
+print(as.data.frame(rho_tab_conditional %>%
+        left_join(strata_summary, by = c("study", "contrast")) %>%
+        transmute(study, contrast, covariates, n, rho = r2(rho_marginal), rho_x = r2(rho_x),
+                  ci_lower = r2(ci_lower), ci_upper = r2(ci_upper),
+                  strata = ifelse(is.na(strata), "--", strata))), row.names = FALSE)
+cat("Strata order: baseline (above, below the median), type of diabetes (adult, juvenile),",
+    "school (A, B), gender or sex (female, male), study (range over 1-4).\n")
+
+all_rho <- c(rho_tab_BE$rho, rho_tab_additional$rho)
+all_lo  <- c(rho_tab_BE$ci_lower, rho_tab_additional$ci_lower)
+lowest  <- rho_tab_additional[which.min(rho_tab_additional$rho), ]
+
+cat("\n==== Numbers quoted in the text ====\n")
+cat("Studies:", nrow(rho_tab_BE) + n_distinct(rho_tab_additional$study),
+    "(30 replicateBE + 19 additional); contrasts:", length(all_rho), "\n")
+cat("All 54 estimates positive:", all(all_rho > 0),
+    "| median:", r2(median(all_rho)),
+    "| > 0.5:", sum(all_rho > 0.5), "| > 0.33:", sum(all_rho > 0.33),
+    "| CI excludes 0:", sum(all_lo > 0), "\n")
+cat("Lowest:", r2(lowest$rho), "+/-", r2((lowest$ci_upper - lowest$ci_lower) / 2),
+    "(", lowest$study, ")\n")
+cat("replicateBE: > 0.5:", sum(rho_tab_BE$rho > 0.5), "of 30 | > 0.33:", sum(rho_tab_BE$rho > 0.33),
+    "of 30 | values below 0.5 all simulated:", all(rho_tab_BE$type[rho_tab_BE$rho < 0.5] == "Simulated"),
+    "| minimum over measured datasets:", r4(min(rho_tab_BE$rho[rho_tab_BE$type == "Measured"])), "\n")
+cat("Additional studies: median", r2(median(rho_tab_additional$rho)),
+    "| > 0.5:", sum(rho_tab_additional$rho > 0.5), "of 24 | CI excludes 0:",
+    sum(rho_tab_additional$ci_lower > 0), "of 24\n")
+
+# Attainable correlation of the binary retinopathy outcomes, given their marginals.
+drs_pairs <- unit_pairs(drs_long, "untreated", "laser")
+p0 <- mean(drs_pairs$untreated); p1 <- mean(drs_pairs$laser)
+lo <- min(p0, p1); hi <- max(p0, p1)
+cat(sprintf("Retinopathy: blindness %.1f%% (untreated) vs %.1f%% (laser); maximal attainable correlation %.2f\n",
+            100 * p0, 100 * p1, sqrt(lo * (1 - hi) / (hi * (1 - lo)))))
+
+pa <- rho_tab_additional %>% filter(!is.na(rho_period_adj))
+cat("Period adjustment: contrasts with period labels:", nrow(pa),
+    "| rho increased in all:", all(pa$rho_period_adj > pa$rho), "\n")
+print(as.data.frame(pa %>% transmute(study, contrast, rho = r2(rho), rho_period_adjusted = r2(rho_period_adj))),
+      row.names = FALSE)
+
+cat("Conditional: adjusted rho(x) positive:", sum(rho_tab_conditional$rho_x > 0), "of", nrow(rho_tab_conditional),
+    "| CI excludes 0:", sum(rho_tab_conditional$ci_lower > 0),
+    "| stratum-specific positive:", sum(rho_tab_strata$rho > 0), "of", nrow(rho_tab_strata), "\n")
+
+if (save_tables) {
+  write.csv(rho_tab_BE, "table_replicateBE.csv", row.names = FALSE)
+  write.csv(rho_tab_additional, "table_additional_studies.csv", row.names = FALSE)
+  write.csv(rho_tab_conditional, "table_conditional_rho.csv", row.names = FALSE)
+  write.csv(rho_tab_strata, "table_conditional_rho_strata.csv", row.names = FALSE)
+}
+
+# =============================================================================
 # Screened but excluded candidates (reason in brackets)
-# ---------------------------------------------------------------------------
+# =============================================================================
 # Fewer than 10 complete pairs: agridat::lucas.switchback and
 #   agridat::patterson.switchback [each cow receives only 2 of the 3/4
-#   treatments, <= 4 pairs per contrast]; nlme::Tetracycline1/2 [5 subjects];
-#   daewr::bioeqv [3]; PairedData::Tobacco and ::Sewage [8]; BSDA::Coffee [9];
-#   nlme::ergoStool [9]; nlme::Machines [6]; nlme::Meat [<= 3 per contrast].
+#   treatments]; nlme::Tetracycline1/2 [5 subjects]; daewr::bioeqv [3];
+#   PairedData::Tobacco and ::Sewage [8]; BSDA::Coffee [9]; nlme::ergoStool [9];
+#   nlme::Machines [6]; nlme::Meat [<= 3 per contrast].
 # Not a within-unit contrast: agridat::depalluel.sheep [one diet per animal];
-#   exactRankTests::ears [treatment assigned per child, both ears same arm];
-#   heplots::Headache, Lock5Data::CaffeineTaps [between-subject].
+#   exactRankTests::ears [treatment assigned per child]; heplots::Headache,
+#   Lock5Data::CaffeineTaps [between-subject].
 # Simulated / hypothetical: BE::NCAResult4BE, Lock5Data::TrafficFlow,
-#   heplots::ReactTime and afex::md_12.1 [Maxwell & Delaney hypothetical data].
+#   heplots::ReactTime and afex::md_12.1 [hypothetical data].
 # Duplicate of a replicateBE dataset: BElikelihood::dat [same Cmax values as DS26].
 # Only within-subject differences available: Stat2Data::Eyes, datasets::sleep.
-# Matched pairs of distinct units (not the same unit): Darwin's maize
-#   (HistData::ZeaMays, PairedData::Corn, DAAG::mignonette), sibling chicks
-#   (PairedData::ChickWeight), PairedData::BloodLead, paired plots
-#   (PairedData::Barley, ::Grain, ::Grain2), Sleuth3::case0202 [twins].
+# Matched pairs of distinct units: HistData::ZeaMays, PairedData::Corn,
+#   DAAG::mignonette, PairedData::ChickWeight, PairedData::BloodLead,
+#   PairedData::Barley, ::Grain, ::Grain2, Sleuth3::case0202 [twins].
 # Method comparison / no intervention: PairedData::Iron, ::Meat, PASWR2::TENNIS,
 #   Lock5Data::QuizPulse10, PairedData::GrapeFruit, PairedData::Anorexia
-#   [before-after], product-rating designs (Lock5Data::WaterTaste,
+#   [before-after], product ratings (Lock5Data::WaterTaste,
 #   crossdes::biertest.dat, Lock5Data::StorySpoilers).
