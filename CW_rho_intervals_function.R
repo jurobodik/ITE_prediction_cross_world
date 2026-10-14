@@ -79,15 +79,21 @@ CW_rho_intervals  <- function(X, Y, treatment, new_points,
                         CQR_type = 'multiplicative', #choices: 'multiplicative', 'additive', 'naive'
                         CATE_estimate = 'T-learner', #choices: 'T-learner', 'Causal_forest'
                         add_confidence_intervals = TRUE, #If TRUE, then we compute confidence intervals for CATE via bootstrap and add them to the prediction intervals
-                        number_of_bootstraps = 50){ #Number of bootstraps for confidence intervals when add_confidence_intervals==TRUE
+                        number_of_bootstraps = 50, #Number of bootstraps for confidence intervals when add_confidence_intervals==TRUE
+                        confidence_coverage = 0.9){ #Separate CI level 1-beta; the paper's bound is (1-alpha)*(1-beta), up to coverage error
   
   
   
   ####################################################################################
   ####################### Some helpful functions #####################################
   ####################################################################################
-  rho_distance = function(x, y, rho)return(sqrt(x^2 + y^2 - 2*rho*x*y))
-  CI_addition = function(x, rho) return( x*((1+rho)/2)^2 )                      
+  rho_distance = function(x, y, rho)return(sqrt(pmax(x^2 + y^2 - 2*rho*x*y, 0)))
+  CI_addition = function(r, a, b, rho) {
+    # Exact c-star * r from the appendix, separately for each endpoint.
+    v_a = pmax(a - r/2, 0); v_b = pmax(b - r/2, 0)
+    return(ifelse(r == 0, 0, pmax(0,
+      rho_distance(v_a, v_b, rho) + (a - v_a) + (b - v_b) - rho_distance(a, b, rho))))
+  }
   
   
   
@@ -147,8 +153,9 @@ CW_rho_intervals  <- function(X, Y, treatment, new_points,
     
     # ------------------ Split train/calibration ------------------
     n <- nrow(X)
-    train_idx <- 1:(n * train_calib_split)
-    calib_idx <- (n * train_calib_split + 1):n
+    n_train <- floor(n * train_calib_split)
+    train_idx <- seq_len(n_train)
+    calib_idx <- seq.int(n_train + 1L, n)
     
     X_train <- data.frame(X[train_idx, ]); names(X_train) = names(X)
     Y_train <- Y[train_idx]
@@ -191,12 +198,17 @@ CW_rho_intervals  <- function(X, Y, treatment, new_points,
     pred_05 <- pmin(pred_05, pred_50)
     
     # ------------------ Propensity scores ------------------
-    data_ps <- data.frame(treatment_train = treatment_train, X_all[train_idx, ]); names(data_ps) <- c("treatment_train", names(X_all))
+    ps_train <- unlist(lapply(c(0, 1), function(t) {
+      rows <- which(treatment == t)
+      head(rows, floor(length(rows) * train_calib_split))
+    }))
+    data_ps <- data.frame(treatment_train = treatment[ps_train], X_all[ps_train, , drop = FALSE])
+    names(data_ps) <- c("treatment_train", names(X_all))
     
     ps_model <- gbm(treatment_train ~ ., data = data_ps,
                     distribution = "bernoulli", n.trees = 300, interaction.depth = 3,
                     shrinkage = 0.05, verbose = FALSE)
-    newdata_ps <- data.frame(X_all[calib_idx, ]);    colnames(newdata_ps) <- names(data_ps)[-1]  # Just to be safe
+    newdata_ps <- X_calib
     e_hat <- predict(ps_model, newdata = newdata_ps, n.trees = 300, type = "response")
     e_hat <- pmin(pmax(e_hat, propensity_clipping), 1-propensity_clipping)
     
@@ -272,10 +284,11 @@ CW_rho_intervals  <- function(X, Y, treatment, new_points,
     new_points = data.frame(new_points); names(new_points) <- c(paste0("X", 1:d))
     my_sequence = rbind(X, new_points)
     n=nrow(Y);
-    train = 1:(n*train_calib_split); calib = (n*train_calib_split+1):n
+    n_train = floor(n*train_calib_split)
+    train = seq_len(n_train); calib = seq.int(n_train+1L, n)
     
-    X_train = X[train,]; Y_train = Y[train,];
-    X_calib = X[calib,]; Y_calib = Y[calib,];
+    X_train = X[train, , drop = FALSE]; Y_train = Y[train,];
+    X_calib = X[calib, , drop = FALSE]; Y_calib = Y[calib,];
     
     n_train = length(Y_train); n_calib = length(Y_calib);
     index_sequences = (n_train+1):(n_train+n_calib) #This is used to extract the new points from the combined sequence
@@ -288,7 +301,6 @@ CW_rho_intervals  <- function(X, Y, treatment, new_points,
     create_formula = function(X, smoothing=TRUE){
       form="Y ~ "
       d= ncol(X); if (is.null(nrow(X))) {d=1}
-      if(d==1){if(smoothing==FALSE)return(as.formula('Y~X1'))else return(as.formula('Y~s(X1)'))}
       if(smoothing==TRUE){
         for (i in 1:d) {#Discrete variable is if it contains <=9 different values
           if (  length(unique(X[,i]))>9  ) {form=paste(form, paste0("s(X", i,  ")+"))}
@@ -306,7 +318,7 @@ CW_rho_intervals  <- function(X, Y, treatment, new_points,
     X = X_train; Y = Y_train
     n=length(Y_train);
     data = data.frame(X=X_train, Y=Y_train);   names(data) <- c(paste0("X", 1:d), "Y")
-    if(d==1){newdata = data.frame(X1 = c(my_sequence))}else{newdata = my_sequence}
+    newdata = my_sequence
     
     if(CQR_qr == 'qGAM'){
       fit_f <- gam(create_formula(X), data = data)
@@ -375,8 +387,9 @@ CW_rho_intervals  <- function(X, Y, treatment, new_points,
     
     # ------------------ Split ------------------
     n <- nrow(X)
-    train_idx <- 1:(n * train_calib_split)
-    calib_idx <- (n * train_calib_split + 1):n
+    n_train <- floor(n * train_calib_split)
+    train_idx <- seq_len(n_train)
+    calib_idx <- seq.int(n_train + 1L, n)
     
     X_train <- data.frame(X[train_idx, ]); names(X_train) = names(X)
     Y_train <- Y[train_idx]
@@ -475,13 +488,15 @@ CW_rho_intervals  <- function(X, Y, treatment, new_points,
     X = data.frame(X); Y = data.frame(Y)
     d = ncol(X); if (is.null(nrow(X))) d = 1
     names(data_original) = c(paste0("X", 1:d), "Y")
+    names(X) = paste0("X", 1:d)
     new_points = data.frame(new_points); names(new_points) = c(paste0("X", 1:d))
     my_sequence = rbind(X, new_points)
     
     n = nrow(Y)
-    train = 1:(n * train_calib_split); calib = (n * train_calib_split + 1):n
-    X_train = X[train,]; Y_train = Y[train,]
-    X_calib = X[calib,]; Y_calib = Y[calib,]
+    n_train = floor(n * train_calib_split)
+    train = seq_len(n_train); calib = seq.int(n_train + 1L, n)
+    X_train = X[train, , drop = FALSE]; Y_train = Y[train,]
+    X_calib = X[calib, , drop = FALSE]; Y_calib = Y[calib,]
     n_train = length(Y_train); n_calib = length(Y_calib)
     index_sequences = (n_train + 1):(n_train + n_calib)
     
@@ -489,7 +504,9 @@ CW_rho_intervals  <- function(X, Y, treatment, new_points,
       form = "Y ~ "
       d = ncol(X); if (is.null(nrow(X))) d = 1
       for (i in 1:d) {
-        if (smoothing && length(unique(X[, i])) > 9) {
+        if (!smoothing) {
+          form = paste(form, paste0("X", i, "+"))
+        } else if (length(unique(X[, i])) > 9) {
           form = paste(form, paste0("s(X", i, ")+"))
         } else {
           form = paste(form, paste0("as.factor(X", i, ")+"))
@@ -507,7 +524,7 @@ CW_rho_intervals  <- function(X, Y, treatment, new_points,
     
     PCS_estimates_gam = list(); PCS_estimates_locfit = list()
     for (i in 1:number_of_bootstraps) {
-      data_b = data[sample(1:n, n, replace = TRUE),]
+      data_b = data[sample(seq_len(nrow(data)), nrow(data), replace = TRUE),]
       names(data_b) = c(paste0("X", 1:d), "Y")
       fit = gam(create_formula(X), sp = 0, data = data_b)
       preds = predict(fit, newdata = my_sequence)
@@ -539,6 +556,7 @@ CW_rho_intervals  <- function(X, Y, treatment, new_points,
     upper = prediction_f + gamma * (PCS_upper - prediction_f)
     
     # Restrict to prediction points
+    n = nrow(data_original)
     m = nrow(new_points)
     prediction_f = prediction_f[(n+1):(n+m)]
     lower = lower[(n+1):(n+m)]
@@ -562,13 +580,15 @@ CW_rho_intervals  <- function(X, Y, treatment, new_points,
     X = data.frame(X); Y = data.frame(Y)
     d = ncol(X); if (is.null(nrow(X))) d = 1
     names(data_original) = c(paste0("X", 1:d), "Y")
+    names(X) = paste0("X", 1:d)
     new_points = data.frame(new_points); names(new_points) = c(paste0("X", 1:d))
     my_sequence = rbind(X, new_points)
     
     n = nrow(Y)
-    train = 1:(n * train_calib_split); calib = (n * train_calib_split + 1):n
-    X_train = X[train,]; Y_train = Y[train,]
-    X_calib = X[calib,]; Y_calib = Y[calib,]
+    n_train = floor(n * train_calib_split)
+    train = seq_len(n_train); calib = seq.int(n_train + 1L, n)
+    X_train = X[train, , drop = FALSE]; Y_train = Y[train,]
+    X_calib = X[calib, , drop = FALSE]; Y_calib = Y[calib,]
     n_train = length(Y_train); n_calib = length(Y_calib)
     index_sequences = (n_train + 1):(n_train + n_calib)
     
@@ -577,7 +597,9 @@ CW_rho_intervals  <- function(X, Y, treatment, new_points,
       form = "Y ~ "
       d = ncol(X); if (is.null(nrow(X))) d = 1
       for (i in 1:d) {
-        if (smoothing && length(unique(X[, i])) > 9) {
+        if (!smoothing) {
+          form = paste(form, paste0("X", i, "+"))
+        } else if (length(unique(X[, i])) > 9) {
           form = paste(form, paste0("s(X", i, ")+"))
         } else {
           form = paste(form, paste0("as.factor(X", i, ")+"))
@@ -595,8 +617,8 @@ CW_rho_intervals  <- function(X, Y, treatment, new_points,
     q05_mat = q50_mat = q95_mat = list()
     invisible(capture.output({ #This should stop from printing to the console (verboise=FALSE doesnt work)
       for (i in 1:number_of_bootstraps) {
-        data_b = data[sample(1:n, n, replace = TRUE),]
-        newdata = if (d == 1) data.frame(X1 = c(my_sequence)) else my_sequence
+        data_b = data[sample(seq_len(nrow(data)), nrow(data), replace = TRUE),]
+        newdata = my_sequence
         
         q95_mat[[i]] = predict(qgam(create_formula(X), data = data_b, qu = (1 + desired_coverage) / 2), newdata)
         q50_mat[[i]] = predict(qgam(create_formula(X), data = data_b, qu = 0.5), newdata)
@@ -622,7 +644,7 @@ CW_rho_intervals  <- function(X, Y, treatment, new_points,
     # Step 2: Estimate epistemic uncertainty using gam and locfit
     PCS_mat = list()
     for (i in 1:number_of_bootstraps) {
-      data_b = data[sample(1:n, n, replace = TRUE),]
+      data_b = data[sample(seq_len(nrow(data)), nrow(data), replace = TRUE),]
       fit = gam(create_formula(X), sp = 0, data = data_b)
       PCS_mat[[length(PCS_mat) + 1]] = predict(fit, newdata = my_sequence)
       
@@ -710,7 +732,7 @@ CW_rho_intervals  <- function(X, Y, treatment, new_points,
                              treatment = data$treatment,
                              X_all = X,  new_points,
                     desired_coverage=desired_coverage, 
-                    our_weights = '1/e',
+                    our_weights = '1/(1-e)',
                     train_calib_split = train_calib_split, 
                     CQR_qr = CQR_qr, 
                     CQR_type = CQR_type)
@@ -718,7 +740,7 @@ CW_rho_intervals  <- function(X, Y, treatment, new_points,
                              treatment = data$treatment,
                              X_all = X,    new_points,
                     desired_coverage=desired_coverage, 
-                    our_weights = '1/(1-e)',
+                    our_weights = '1/e',
                     train_calib_split = train_calib_split, 
                     CQR_qr = CQR_qr, 
                     CQR_type = CQR_type)
@@ -783,12 +805,20 @@ CW_rho_intervals  <- function(X, Y, treatment, new_points,
   upper_u1 = estimate1$upper - hat_f1
   my_sequence1 = estimate1$new_points
   
-  #combine sequences: if univariate then just sort and unique
-  if(is.null(ncol(my_sequence0)))my_sequence = sort(unique(c(my_sequence0, my_sequence1)))
-  if(!is.null(ncol(my_sequence0)))my_sequence = unique(rbind(my_sequence0, my_sequence1)) 
+  # Preserve the order and multiplicity of the requested prediction points.
+  my_sequence = new_points
   
   
   
+  # The paper centers the outcome intervals at conditional-mean estimates.
+  # Naive_conformal uses mean regression; use the same fits in the bootstrap.
+  mean0 = Naive_conformal(X_untreated, Y_untreated, new_points,
+                          desired_coverage, train_calib_split, CQR_qr)
+  mean1 = Naive_conformal(X_treated, Y_treated, new_points,
+                          desired_coverage, train_calib_split, CQR_qr)
+  hat_f0 = mean0$hat_f; hat_f1 = mean1$hat_f
+  lower_u0 = pmax(hat_f0 - lower0, 0); upper_u0 = pmax(upper0 - hat_f0, 0)
+  lower_u1 = pmax(hat_f1 - lower1, 0); upper_u1 = pmax(upper1 - hat_f1, 0)
   if(CATE_estimate=='T-learner'){CATE = hat_f1 - hat_f0}
   
   if(CATE_estimate=='Causal_forest'){
@@ -796,7 +826,7 @@ CW_rho_intervals  <- function(X, Y, treatment, new_points,
                        Y = data_original$Y, 
                        W = as.numeric(treatment))
     
-    CATE =  predict(cf,newdata = my_sequence)$predictions 
+    CATE =  predict(cf,newdata = as.matrix(my_sequence))$predictions 
   }
 
   
@@ -805,7 +835,7 @@ CW_rho_intervals  <- function(X, Y, treatment, new_points,
   ########################################################################################
   if(add_confidence_intervals==TRUE){
     
-    cate_hat_boot=list()
+    cate_hat_boot=list(); mean0_boot=list(); mean1_boot=list()
     for(k in 1:number_of_bootstraps){
       data_boot = data[sample(1:nrow(data_original), nrow(data_original), replace = TRUE),]
       
@@ -813,7 +843,7 @@ CW_rho_intervals  <- function(X, Y, treatment, new_points,
       cate_hat_boot[[k]] = predict(causal_forest(X=as.matrix(data_boot[, 1:d]), 
                                                  Y = data_boot$Y, 
                                                  W = data_boot$treatment),
-                                   newdata = my_sequence)$predictions
+                                   newdata = as.matrix(my_sequence))$predictions
       }
       if(CATE_estimate=='T-learner'){
         data0 = data_boot[data_boot$treatment==0,]
@@ -829,16 +859,25 @@ CW_rho_intervals  <- function(X, Y, treatment, new_points,
                         desired_coverage=desired_coverage, 
                         train_calib_split = train_calib_split, 
                         CQR_qr = CQR_qr)
+        mean0_boot[[k]] = estimate0$hat_f
+        mean1_boot[[k]] = estimate1$hat_f
         cate_hat_boot[[k]] = estimate1$hat_f - estimate0$hat_f
       }
     } 
-    #Produce 5% and 95% quantiles from all bootstraps
-    cate_hat_boot = do.call(cbind, cate_hat_boot)
-    cate_hat_boot = apply(cate_hat_boot, 1, quantile, probs = c(0.05, 0.5, 0.95))
-    
-    CATE=cate_hat_boot[2,]
-    CATE_lower_CI = cate_hat_boot[2,] - cate_hat_boot[1,]
-    CATE_upper_CI = cate_hat_boot[3,] - cate_hat_boot[2,]
+    ci_probs = c((1-confidence_coverage)/2, (1+confidence_coverage)/2)
+    if(CATE_estimate=='T-learner'){
+      ci0 = apply(do.call(cbind, mean0_boot), 1, quantile, probs = ci_probs)
+      ci1 = apply(do.call(cbind, mean1_boot), 1, quantile, probs = ci_probs)
+      # Each arm's relevant one-sided radius is at most r/2 (conditional_beta).
+      CATE_lower_CI = 2*pmax(hat_f1 - ci1[1,], ci0[2,] - hat_f0, 0)
+      CATE_upper_CI = 2*pmax(hat_f0 - ci0[1,], ci1[2,] - hat_f1, 0)
+    }else{
+      # CATE-only CI: the theorem also requires equal conditional variances
+      # and a center equal to the difference of the two outcome mean estimates.
+      cate_hat_boot = apply(do.call(cbind, cate_hat_boot), 1, quantile, probs = ci_probs)
+      CATE_lower_CI = pmax(CATE - cate_hat_boot[1,], 0)
+      CATE_upper_CI = pmax(cate_hat_boot[2,] - CATE, 0)
+    }
     
     }
 
@@ -846,11 +885,11 @@ CW_rho_intervals  <- function(X, Y, treatment, new_points,
   
   
   if(add_confidence_intervals==FALSE){
-    lower = CATE - rho_distance(lower_u0, upper_u1, rho)
-    upper = CATE + rho_distance(upper_u0, lower_u1, rho)
+    lower = CATE - rho_distance(lower_u1, upper_u0, rho)
+    upper = CATE + rho_distance(lower_u0, upper_u1, rho)
   }else{
-    lower = CATE - rho_distance(lower_u0, upper_u1, rho) - CI_addition(CATE_lower_CI, rho)
-    upper = CATE + rho_distance(upper_u0, lower_u1, rho) + CI_addition(CATE_upper_CI, rho)
+    lower = CATE - rho_distance(lower_u1, upper_u0, rho) - CI_addition(CATE_lower_CI, lower_u1, upper_u0, rho)
+    upper = CATE + rho_distance(lower_u0, upper_u1, rho) + CI_addition(CATE_upper_CI, lower_u0, upper_u1, rho)
   }
   names(upper) = names(lower) = names(CATE) = paste0("new_point_", 1:nrow(data.frame(new_points)))
   return(list(new_points = new_points, CATE = CATE, lower = lower, upper = upper))
@@ -864,20 +903,28 @@ CW_rho_intervals  <- function(X, Y, treatment, new_points,
 
 #Do you want to compute CW_rho intervals for different Uncertainty estimation, or different CATE estimate? Its easy!
 #input estimate0, estimate1 and CATE in the following form:
-#   estimate0 is a data-frame with estimate0$f_hat;  estimate0$lower;  estimate0$upper; estimate0$new_points
-#   estimate1 is a data-frame with estimate1$f_hat;  estimate1$lower;  estimate1$upper; estimate1$new_points
+#   estimate0/estimate1 have f_hat (or hat_f), lower, upper and new_points.
+#   f_hat/hat_f must estimate the conditional mean, as in the paper.
 #   here, new_points are the points where we want to estimate ITEs (i.e. covariates in the test dataset)
-#   CATE is a data-frame with CATE$CATE; (and CATE$lower; CATE$upper if we want to add confidence intervals)
-#Output is a data-frame with lower and upper prediction intervals for ITE, together with CATE and new-points
+#   CATE is numeric, or has CATE, lower and upper columns; alternatively supply
+#   CATE_CI as a list/data.frame with lower and upper CI endpoints.
+#   The CI theorem with a CATE-only CI requires equal conditional variances
+#   and CATE = f_hat1 - f_hat0.
+#Output is a list with lower and upper prediction intervals, CATE and new_points.
 
 
 
 CW_rho_intervals_compute_yourself = function(estimate0, estimate1, CATE = NULL, 
                            rho = 0, CATE_CI = NULL) {
-  rho_distance = function(x, y, rho)return(sqrt(x^2 + y^2 - 2*rho*x*y))
-  CI_addition = function(x, rho) return( x*((1+rho)/2)^2 )       
+  rho_distance = function(x, y, rho)return(sqrt(pmax(x^2 + y^2 - 2*rho*x*y, 0)))
+  CI_addition = function(r, a, b, rho) {
+    # Exact c-star * r; computing the product avoids division by zero at r=0.
+    v_a = pmax(a - r/2, 0); v_b = pmax(b - r/2, 0)
+    return(ifelse(r == 0, 0, pmax(0,
+      rho_distance(v_a, v_b, rho) + (a - v_a) + (b - v_b) - rho_distance(a, b, rho))))
+  }
   
-  prediction_f0 = estimate0$f_hat
+  prediction_f0 = if(!is.null(estimate0$f_hat)) estimate0$f_hat else estimate0$hat_f
   lower0 = estimate0$lower
   upper0 = estimate0$upper
   lower_u0 = prediction_f0 - estimate0$lower 
@@ -885,35 +932,40 @@ CW_rho_intervals_compute_yourself = function(estimate0, estimate1, CATE = NULL,
   my_sequence0 = estimate0$new_points
   
   # Extract second estimate details
-  prediction_f1 = estimate1$f_hat
+  prediction_f1 = if(!is.null(estimate1$f_hat)) estimate1$f_hat else estimate1$hat_f
   lower1 = estimate1$lower
   upper1 = estimate1$upper
   lower_u1 = prediction_f1 - estimate1$lower 
   upper_u1 = estimate1$upper - prediction_f1
   my_sequence1 = estimate1$new_points
   
-  #combine sequences
-  if(is.null(ncol(my_sequence0)))new_points = sort(unique(c(my_sequence0, my_sequence1)))
-  if(!is.null(ncol(my_sequence0)))new_points = unique(rbind(my_sequence0, my_sequence1)) 
+  # Both estimates must refer to the same rows in the same order.
+  if(!identical(data.frame(my_sequence0), data.frame(my_sequence1)))
+    stop("estimate0 and estimate1 must use the same ordered new_points")
+  new_points = my_sequence0
   
   
   
   if(is.null(CATE)){CATE = prediction_f1 - prediction_f0}#We use simple t-estimator unless specified otherwise
-  CATE = data.frame(CATE)
+  if(is.data.frame(CATE) || is.list(CATE)){
+    if(is.null(CATE_CI) && !is.null(CATE$lower))
+      CATE_CI = list(lower = CATE$lower, upper = CATE$upper)
+    CATE = CATE$CATE
+  }
+  CATE = as.numeric(CATE)
   
   
-  if(is.null(CATE$lower)){
-    lower = CATE - rho_distance(lower_u0, upper_u1, rho)
-    upper = CATE + rho_distance(upper_u0, lower_u1, rho)
+  if(is.null(CATE_CI)){
+    lower = CATE - rho_distance(lower_u1, upper_u0, rho)
+    upper = CATE + rho_distance(lower_u0, upper_u1, rho)
   }else{
-    CI_lower = CATE - CATE$lower
-    CI_upper = CATE$upper - CATE
-    lower = CATE - rho_distance(lower_u0, upper_u1, rho) - CI_addition(CI_lower, rho)
-    upper = CATE + rho_distance(upper_u0, lower_u1, rho) + CI_addition(CI_upper, rho)
+    CI_lower = pmax(CATE - CATE_CI$lower, 0)
+    CI_upper = pmax(CATE_CI$upper - CATE, 0)
+    lower = CATE - rho_distance(lower_u1, upper_u0, rho) - CI_addition(CI_lower, lower_u1, upper_u0, rho)
+    upper = CATE + rho_distance(lower_u0, upper_u1, rho) + CI_addition(CI_upper, lower_u0, upper_u1, rho)
   }
   
-  return(list(new_points = new_points, CATE = CATE$CATE, lower = lower, upper = upper))
+  return(list(new_points = new_points, CATE = CATE, lower = lower, upper = upper))
 }
-
 
 
