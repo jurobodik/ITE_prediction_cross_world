@@ -2,167 +2,970 @@
 # Author: jurajbodik.com
 # Description:
 #   This script provides an implementation of prediction intervals 
-#   for Individual Treatment Effects (ITE) using the CW_rho_intervals function 
-#   under the Cross-World Assumption, characterized by the correlation parameter `rho`.
+#   for Individual Treatment Effects (ITE) using CW_rho_intervals under
+#   the Cross-World Assumption (correlation parameter `rho`). 
+#   It supports several conformal prediction methods (CQR, PCS, CLEAR, Naive) 
+#   and two CATE estimation strategies (T-learner and Causal Forest).
 #
-#   Core Function:
-#     - `CW_rho_intervals`:
-#         * Estimates prediction intervals for ITEs given new covariate values
-#         * Combines uncertainty from both treatment arms using a correlation-based formula
-#         * Optionally adds bootstrap-based confidence intervals to account for CATE variability
+#   The core function is `CW_rho_intervals`, which:
+#     - Estimates ITE prediction intervals at new covariate values
+#     - Combines uncertainty from both treated and control outcomes
+#     - Optionally adds bootstrap-based confidence intervals (recommended, but a bit slower)
 #
-#   Dependencies:
-#     - numpy
-#     - pandas
-#     - lightgbm
-#     - scikit-learn
+#   Dependencies: randomForest, quantregForest, qgam, mgcv, locfit, gbm, matrixStats, grf, Hmisc, MASS
+#   Input:
+#     - X: covariates (data.frame)
+#     - Y: observed outcomes (numeric vector)
+#     - treatment: treatment indicator (0/1)
+#     - new_points: covariates where prediction is needed (data.frame)
+#     - rho: assumed correlation between potential outcomes (number)
 #
-#   Inputs:
-#     - X: covariates (numpy array or pandas DataFrame), shape (n_samples, n_features)
-#     - Y: observed outcomes (array-like), shape (n_samples,)
-#     - treatment: treatment assignment (0/1), shape (n_samples,)
-#     - new_points: covariates for which to predict ITEs (same format as X)
-#     - rho: assumed correlation between potential outcomes (float in [-1, 1])
-#
-#   Optional Inputs:
-#     - desired_coverage (float): target marginal coverage (default: 0.9)
-#     - train_calib_split (float): proportion of data used for training vs calibration (default: 0.8)
-#     - weighted_conformal (bool): whether to use propensity-weighted conformal inference (default: False)
-#     - conformal (str): conformal method to use ('CQR' or 'naive') (default: 'CQR', see R version for PCS or CLEAR)
-#     - CQR_qr (str): placeholder for QR engine; not used in current version (default: 'auto')
-#     - CQR_type (str): conformity score type ('multiplicative', 'additive', or 'naive') (default: 'multiplicative')
-#     - CATE_estimate (str): method for estimating the CATE ('T-learner') (default: 'T-learner', see R version for other options like causal_forest)
-#     - add_confidence_intervals (bool): whether to compute bootstrap confidence intervals (default: True)
-#     - number_of_bootstraps (int): number of bootstrap replicates (default: 50)
-#
-# Supported Features:
-#     - Conformal prediction methods: CQR, Naive (PCS and CLEAR not yet implemented in Python)
-#     - CATE estimation via T-learner (Causal Forest not included in this version)
-#     - Bootstrap-based confidence intervals (optional but recommended)
-#
-#   Output:
-#     - Dictionary with:
-#         * 'new_points': the new covariate values (DataFrame)
-#         * 'CATE': estimated conditional average treatment effects (pandas Series)
-#         * 'lower': lower prediction bounds for ITEs (pandas Series)
-#         * 'upper': upper prediction bounds for ITEs (pandas Series)
+#   Output: Prediction intervals for ITE (CATE ± uncertainty), optionally with added CI (recommended, but a bit slower)
+
 ################################################################################
+# Example Usage:
+#
+# ################# Simulate synthetic data
+# set.seed(0)
+#  n <- 1000
+#  d <- 5
+#  rho=0.5
+#  
+#  X <- as.data.frame(matrix(rnorm(n * d), ncol = d))
+#  treatment <- rbinom(n, 1, 0.5)
+#  epsilons <- mvrnorm(n = n, mu = c(0,0), Sigma = matrix(c(1, rho, rho, 1), nrow = 2)) 
+#  Y0 <- X[,1]              + epsilons[,1]
+#  Y1 <- X[,1] + 1+ X[,2]^2 + epsilons[,2]
+#  Y <- ifelse(treatment == 1, Y1, Y0)
+# 
+# ################# Define new points to predict ITEs
+#  new_points <- as.data.frame(matrix(rnorm(10 * d), ncol = d))
+# #################  Compute CW_rho_intervals
+#  result <- CW_rho_intervals(X = X,
+#                            Y = Y,
+#                            treatment = treatment,
+#                            new_points = new_points,
+#                            rho = rho,
+#                            conformal = "CQR", 
+#                            weighted_conformal = FALSE,
+#                            add_confidence_intervals = FALSE)
+#
+# print(result$CATE)       # Predicted CATEs
+# print(result$lower)      # Lower prediction bounds
+# print(result$upper)      # Upper prediction bounds
+###print(result$CATE - 1-new_points[,2]^2) #print error: hat{CATE} - CATE 
+###############################################################################
 
-import numpy as np
-import pandas as pd
-import lightgbm as lgb #We use this for quantile regression: change 'fit_lgb_quantile' for different estimation
-from sklearn.ensemble import GradientBoostingClassifier #We use this for propensity score estimation
-import catboost as cb
-from pygam import ExpectileGAM
 
-def CW_rho_intervals(
-  X,                                 # Feature matrix (pd.DataFrame)
-  Y,                                 # (factual) outcome variable (np.array)
-  treatment,                         # Treatment assignment (0 or 1) (np.array)
-  new_points,                        # New data points for prediction - where do you want to predict? (pd.DataFrame)
-  rho,                               # Cross-world correlation parameter
-  desired_coverage=0.9,              # Target marginal coverage level for the prediction intervals
-  train_calib_split=0.8,             # Fraction of data used for training (rest used for calibration)
-  weighted_conformal=False,          # Whether to use propensity-score weighted conformal prediction
-  conformal='CQR',                   # Conformal method: 'CQR' or 'naive'
-  CQR_qr='auto',                     # Quantile regression method: 'qgam', 'lightgbm', 'catboost', 'randomforest'. 'auto' chooses qgam for d<=5, lightgbm otherwise
-  CQR_type='multiplicative',         # Type of conformity score: 'multiplicative' or 'additive'
-  CATE_estimate='T-learner',         # Method to estimate CATE
-  add_confidence_intervals=True,     # Whether to add bootstrap confidence intervals
-  number_of_bootstraps=50,           # Number of bootstrap replicates for CI
-):
-    def fit_quantile(X_train, Y_train, alpha):
-        X_train = np.asarray(X_train, dtype=np.float64)
-        Y_train = np.asarray(Y_train).flatten()
-        mask = np.isfinite(X_train).all(axis=1) & np.isfinite(Y_train)
-        X_train, Y_train = X_train[mask], Y_train[mask]
-        method = CQR_qr
-        if CQR_qr == 'auto':
-            method = 'qgam' if X_train.shape[1] <= 5 else 'lightgbm'
-            
-        if method == 'qgam':
-            model = ExpectileGAM(expectile=alpha).gridsearch(X_train, Y_train)
-            return lambda X: model.predict(np.asarray(X, dtype=np.float64))
-        elif method == 'lightgbm':
-            params = {'objective': 'quantile', 'alpha': alpha, 'verbosity': -1}
-            dtrain = lgb.Dataset(X_train, label=Y_train)
-            model = lgb.train(params, dtrain, num_boost_round=100)
-            return lambda X: model.predict(np.asarray(X))
-        elif method == 'catboost':
-            model = cb.CatBoostRegressor(loss_function=f'Quantile:alpha={alpha}', iterations=100, verbose=False)
-            model.fit(X_train, Y_train)
-            return lambda X: model.predict(np.asarray(X))
-        elif method == 'randomforest':
-            model = RandomForestRegressor(n_estimators=100, min_samples_leaf=5)
-            model.fit(X_train, Y_train)
-            return lambda X: np.quantile([tree.predict(np.asarray(X)) for tree in model.estimators_], q=alpha, axis=0)
-        else:
-            raise ValueError("Unsupported quantile regression method")
+library(randomForest)
+library(quantregForest)
+library(qgam)
+library(mgcv)
+library(locfit)
+library(gbm)
+library(matrixStats)
+library(grf)
+library(Hmisc)
+library(MASS)
 
-    def rho_distance(x, y, rho):
-        return np.sqrt(x**2 + y**2 - 2 * rho * x * y)
 
-    def CI_addition(x, rho):
-        return x * ((1 + rho) / 2) ** 2
+CW_rho_intervals  <- function(X, Y, treatment, new_points,
+                        rho,
+                        desired_coverage = 0.9, 
+                        train_calib_split = 0.8, 
+                        weighted_conformal = FALSE, #should we estimate propensity scores and use weighted conformal prediction?
+                        conformal = 'CQR', #choices: 'CQR', 'PCS', 'CLEAR', 'naive' 
+                        CQR_qr = 'auto', #choices: 'RF', 'qGAM', 'naive', 'auto' where 'auto = RF' if d>5 and 'auto = qGAM' if d<=5
+                        CQR_type = 'multiplicative', #choices: 'multiplicative', 'additive', 'naive'
+                        CATE_estimate = 'T-learner', #choices: 'T-learner', 'Causal_forest'
+                        add_confidence_intervals = TRUE, #If TRUE, then we compute confidence intervals for CATE via bootstrap and add them to the prediction intervals
+                        number_of_bootstraps = 50, #Number of bootstraps for confidence intervals when add_confidence_intervals==TRUE
+                        confidence_coverage = 0.9){ #Separate CI level 1-beta; the paper's bound is (1-alpha)*(1-beta), up to coverage error
+  
+  
+  
+  ####################################################################################
+  ####################### Some helpful functions #####################################
+  ####################################################################################
+  rho_distance = function(x, y, rho)return(sqrt(pmax(x^2 + y^2 - 2*rho*x*y, 0)))
+  CI_addition = function(r, a, b, rho) {
+    # Exact c-star * r from the appendix, separately for each endpoint.
+    v_a = pmax(a - r/2, 0); v_b = pmax(b - r/2, 0)
+    return(ifelse(r == 0, 0, pmax(0,
+      rho_distance(v_a, v_b, rho) + (a - v_a) + (b - v_b) - rho_distance(a, b, rho))))
+  }
+  
+  
+  
+  
+  ####################################################################################
+  ####################### Some data handling and splitting ###########################
+  ####################################################################################
+  data_original = data.frame(X=X, Y=Y, treatment = treatment)
+  X=data.frame(X); Y=data.frame(Y);
+  
+  d = ncol(X); if (is.null(nrow(X))) {d=1}
+  names(data_original) <- c(paste0("X", 1:d), "Y", 'treatment')
+  names(X) <- c(paste0("X", 1:d))
+  new_points = data.frame(new_points); names(new_points) <- c(paste0("X", 1:d))
+  my_sequence = rbind(X, new_points)
+  
+  data = data_original
 
-    def predict_interval(X, Y, new_points):
-        X, new_points = np.array(X), np.array(new_points)
-        Y = np.array(Y).flatten()
-        n = X.shape[0]
-        train_size = int(n * train_calib_split)
-        train_idx, calib_idx = np.arange(train_size), np.arange(train_size, n)
-        X_train, Y_train = X[train_idx], Y[train_idx]
-        X_calib, Y_calib = X[calib_idx], Y[calib_idx]
-        all_X = np.vstack([X, new_points])
+  ####################################################################################
+  ############# Lets clean the hyper-parameters into a nice format ###################
+  ####################################################################################
+  if(conformal=='Naive')conformal = 'naive'
+  if(CQR_qr == 'Naive' )CQR_qr = 'naive'
+  if(CQR_qr == 'auto'){if(ncol(data.frame(X))>5){CQR_qr = 'RF'}else{CQR_qr = 'qGAM'}}
+  if(CQR_qr != 'RF' & CQR_qr != 'qGAM' & CQR_qr != 'naive')stop("Quantile regression method not recognized. Choose 'RF' or 'qGAM' or 'naive'")
 
-        pred_95 = fit_quantile(X_train, Y_train, (1 + desired_coverage) / 2)(all_X)
-        pred_50 = fit_quantile(X_train, Y_train, 0.5)(all_X)
-        pred_05 = fit_quantile(X_train, Y_train, (1 - desired_coverage) / 2)(all_X)
-
-        pred_95 = np.maximum(pred_95, pred_50)
-        pred_05 = np.minimum(pred_05, pred_50)
-
-        if CQR_type == 'multiplicative':
-            l, u = pred_50 - pred_05, pred_95 - pred_50
-            scores = [max((pred_50[i] - Y_calib[j]) / l[i] if l[i] else 0,
-                          (Y_calib[j] - pred_50[i]) / u[i] if u[i] else 0) for j, i in enumerate(calib_idx)]
-        else:
-            scores = np.abs(pred_50[calib_idx] - Y_calib)
-
-        gamma = np.quantile(scores, desired_coverage)
-
-        if CQR_type == 'multiplicative':
-            lower = pred_50 - gamma * (pred_50 - pred_05)
-            upper = pred_50 + gamma * (pred_95 - pred_50)
-        else:
-            lower = pred_05 - gamma
-            upper = pred_95 + gamma
-
-        m = new_points.shape[0]
-        return {'hat_f': pred_50[-m:], 'lower': lower[-m:], 'upper': upper[-m:]}
-
-    X, Y, treatment = np.array(X), np.array(Y), np.array(treatment)
-    new_points = np.array(new_points)
-    data = pd.DataFrame(X)
-    data['Y'] = Y
-    data['treatment'] = treatment
-    data0, data1 = data[data.treatment == 0], data[data.treatment == 1]
-
-    est0 = predict_interval(data0.iloc[:, :-2], data0['Y'], new_points)
-    est1 = predict_interval(data1.iloc[:, :-2], data1['Y'], new_points)
-
-    hat_f0, hat_f1 = est0['hat_f'], est1['hat_f']
-    lower_u0, upper_u0 = hat_f0 - est0['lower'], est0['upper'] - hat_f0
-    lower_u1, upper_u1 = hat_f1 - est1['lower'], est1['upper'] - hat_f1
-
-    CATE = hat_f1 - hat_f0
-    lower = CATE - rho_distance(lower_u0, upper_u1, rho)
-    upper = CATE + rho_distance(upper_u0, lower_u1, rho)
-
-    index_names = [f"new_point_{i+1}" for i in range(new_points.shape[0])]
-    return {
-        'new_points': pd.DataFrame(new_points, columns=[f"X{i+1}" for i in range(new_points.shape[1])]),
-        'CATE': pd.Series(CATE, index=index_names),
-        'lower': pd.Series(lower, index=index_names),
-        'upper': pd.Series(upper, index=index_names)
+  
+  
+  ####################################################################################
+  ############# Now we upload CQR and PCS and CLEAR uncertainty estimates ############
+  ####################################################################################
+  
+  
+  
+  
+  
+  
+  CQR_weighted <- function(X, Y, new_points, treatment, X_all,
+                           our_weights = '1/e',  # or '1/(1-e)'
+                           desired_coverage = 0.9,
+                           train_calib_split = 0.8,
+                           CQR_qr = 'auto',
+                           CQR_type = 'multiplicative', 
+                           propensity_clipping = 0.2) {
+    
+    # ------------------ Setup and checks ------------------
+    if (CQR_qr == 'Naive') CQR_qr <- 'naive'
+    if (CQR_qr == 'auto') CQR_qr <- if (ncol(data.frame(X)) > 5) 'RF' else 'qGAM'
+    if (!CQR_qr %in% c('RF', 'qGAM', 'naive')) stop("Unsupported CQR_qr")
+    
+    treatment <- as.numeric(treatment)
+    d <- ncol(data.frame(X))
+    X <- data.frame(X)
+    Y <- as.numeric(unlist(Y))
+    new_points <- data.frame(new_points)
+    names(X) <- names(new_points) <- paste0("X", 1:d)
+    
+    # ------------------ Split train/calibration ------------------
+    n <- nrow(X)
+    n_train <- floor(n * train_calib_split)
+    train_idx <- seq_len(n_train)
+    calib_idx <- seq.int(n_train + 1L, n)
+    
+    X_train <- data.frame(X[train_idx, ]); names(X_train) = names(X)
+    Y_train <- Y[train_idx]
+    X_calib <- data.frame(X[calib_idx, ]); names(X_calib) = names(X)
+    Y_calib <- Y[calib_idx]
+    treatment_train <- treatment[train_idx]
+    treatment_calib <- treatment[calib_idx]
+    X_all <- data.frame(X_all); names(X_all) = names(X)
+    
+    all_X <- rbind(X, new_points)
+    
+    # ------------------ Fit quantile regression ------------------
+    create_formula <- function(X, smoothing = TRUE) {
+      terms <- sapply(1:ncol(X), function(j) {
+        if (length(unique(X[, j])) > 9 && smoothing) paste0("s(X", j, ")")
+        else paste0("as.factor(X", j, ")")
+      })
+      reformulate(terms, response = "Y")
     }
+    
+    if (CQR_qr == 'qGAM') {
+      formula <- create_formula(X_train)
+      invisible(capture.output({
+        fit_95 <- qgam(formula, data = data.frame(X_train, Y = Y_train), qu = (1 + desired_coverage) / 2)
+        fit_50 <- qgam(formula, data = data.frame(X_train, Y = Y_train), qu = 0.5)
+        fit_05 <- qgam(formula, data = data.frame(X_train, Y = Y_train), qu = (1 - desired_coverage) / 2)
+      }))
+      pred_95 <- predict(fit_95, newdata = all_X)
+      pred_50 <- predict(fit_50, newdata = all_X)
+      pred_05 <- predict(fit_05, newdata = all_X)
+    } else {
+      qrf <- quantregForest(x = X_train, y = Y_train, ntree = 1000, nodesize = 5)
+      pred_95 <- predict(qrf, newdata = all_X, what = (1 + desired_coverage) / 2)
+      pred_50 <- predict(qrf, newdata = all_X, what = 0.5)
+      pred_05 <- predict(qrf, newdata = all_X, what = (1 - desired_coverage) / 2)
+    }
+    
+    # ------------------ Enforce order of quantiles ------------------
+    pred_95 <- pmax(pred_95, pred_50)
+    pred_05 <- pmin(pred_05, pred_50)
+    
+    # ------------------ Propensity scores ------------------
+    ps_train <- unlist(lapply(c(0, 1), function(t) {
+      rows <- which(treatment == t)
+      head(rows, floor(length(rows) * train_calib_split))
+    }))
+    data_ps <- data.frame(treatment_train = treatment[ps_train], X_all[ps_train, , drop = FALSE])
+    names(data_ps) <- c("treatment_train", names(X_all))
+    
+    ps_model <- gbm(treatment_train ~ ., data = data_ps,
+                    distribution = "bernoulli", n.trees = 300, interaction.depth = 3,
+                    shrinkage = 0.05, verbose = FALSE)
+    newdata_ps <- X_calib
+    e_hat <- predict(ps_model, newdata = newdata_ps, n.trees = 300, type = "response")
+    e_hat <- pmin(pmax(e_hat, propensity_clipping), 1-propensity_clipping)
+    
+    # ------------------ Calibration ------------------
+    estimate_gamma <- function(type) {
+      if (type == "additive") {
+        scores <- mapply(function(i) {
+          idx <- calib_idx[i]
+          max(pred_05[idx] - Y_calib[i], Y_calib[i] - pred_95[idx])
+        }, seq_along(Y_calib))
+      } else if (type == "multiplicative") {
+        l <- pred_50 - pred_05
+        u <- pred_95 - pred_50
+        scores <- mapply(function(i) {
+          idx <- calib_idx[i]
+          max((pred_50[idx] - Y_calib[i]) / l[idx], (Y_calib[i] - pred_50[idx]) / u[idx])
+        }, seq_along(Y_calib))
+      } else stop("Unknown CQR_type")
+      
+      weights <- if (our_weights == '1/e') 1 / e_hat else 1 / (1 - e_hat)
+      wtd.quantile(scores, weights = weights, probs = desired_coverage)
+    }
+    
+    gamma <- estimate_gamma(CQR_type)
+    
+    # ------------------ Final intervals ------------------
+    if (CQR_type == "multiplicative") {
+      lower <- pred_50 - gamma * (pred_50 - pred_05)
+      upper <- pred_50 + gamma * (pred_95 - pred_50)
+    } else {
+      lower <- pred_05 - gamma
+      upper <- pred_95 + gamma
+    }
+    
+    # ------------------ Extract new points ------------------
+    m <- nrow(new_points)
+    lower <- tail(lower, m)
+    upper <- tail(upper, m)
+    prediction_f <- tail(pred_50, m)
+    
+    list(
+      hat_f = prediction_f,
+      lower = lower,
+      upper = upper,
+      new_points = new_points
+    )
+  }
+  
+  
+  
+  
+  
+  Naive_conformal = function(X, Y, new_points,
+                             desired_coverage = 0.9, 
+                             train_calib_split = 0.8, 
+                             CQR_qr = 'auto'){
+    
+    
+    
+    if(CQR_qr == 'auto'){if(ncol(data.frame(X))>5){CQR_qr = 'RF'}else{CQR_qr = 'qGAM'}}
+    if(CQR_qr == 'Naive' )CQR_qr = 'RF'
+    if(CQR_qr != 'RF' & CQR_qr != 'qGAM' & CQR_qr != 'naive')stop("Quantile regression method not recognized. Choose 'RF' or 'qGAM' or 'naive'")
+    ###########################################################
+    #################Data handling and splitting###############
+    ###########################################################
+    
+    data_original = data.frame(X=X, Y=Y)
+    X=data.frame(X); Y=data.frame(Y);
+    
+    d = ncol(X); if (is.null(nrow(X))) {d=1}
+    names(data_original) <- c(paste0("X", 1:d), "Y")
+    names(X) <- c(paste0("X", 1:d))
+    new_points = data.frame(new_points); names(new_points) <- c(paste0("X", 1:d))
+    my_sequence = rbind(X, new_points)
+    n=nrow(Y);
+    n_train = floor(n*train_calib_split)
+    train = seq_len(n_train); calib = seq.int(n_train+1L, n)
+    
+    X_train = X[train, , drop = FALSE]; Y_train = Y[train,];
+    X_calib = X[calib, , drop = FALSE]; Y_calib = Y[calib,];
+    
+    n_train = length(Y_train); n_calib = length(Y_calib);
+    index_sequences = (n_train+1):(n_train+n_calib) #This is used to extract the new points from the combined sequence
+    
+    
+    ###########################################################
+    ################# hat_f ###################################
+    ###########################################################
+    
+    create_formula = function(X, smoothing=TRUE){
+      form="Y ~ "
+      d= ncol(X); if (is.null(nrow(X))) {d=1}
+      if(smoothing==TRUE){
+        for (i in 1:d) {#Discrete variable is if it contains <=9 different values
+          if (  length(unique(X[,i]))>9  ) {form=paste(form, paste0("s(X", i,  ")+"))}
+          if (  length(unique(X[,i]))<=9) {form=paste(form, paste0("as.factor(X", i,  ")+"))  }
+        }
+      }
+      if(smoothing==FALSE){
+        for (i in 1:d) {form=paste(form, paste0("X", i, "+"))}
+      }
+      
+      form=substr(form,1,nchar(form)-1)
+      return(as.formula(form))
+    }
+    
+    X = X_train; Y = Y_train
+    n=length(Y_train);
+    data = data.frame(X=X_train, Y=Y_train);   names(data) <- c(paste0("X", 1:d), "Y")
+    newdata = my_sequence
+    
+    if(CQR_qr == 'qGAM'){
+      fit_f <- gam(create_formula(X), data = data)
+      hat_f = predict(fit_f, newdata = newdata)
+    }
+    if(CQR_qr == 'RF' || CQR_qr == 'naive'){
+      rf_model <- randomForest(x = data.frame(x = X), y = Y, ntree = 1000, nodesize = 5)
+      names(newdata) <- names(rf_model$forest$xlevels)
+      hat_f <- predict(rf_model, newdata = data.frame(newdata))
+    }
+    
+    
+    ###########################################################
+    ################# Calibration #############################
+    ###########################################################
+    X = X_calib; Y = Y_calib
+    n=length(Y);
+    
+    score = c()
+    for(i in 1:n){
+      index = index_sequences[i]
+      s = abs(hat_f[index] - Y[i])
+      score = c(score, s)
+    }
+    gamma = quantile(score, desired_coverage)
+    
+    lower = hat_f - gamma
+    upper = hat_f + gamma
+    
+    
+    
+    ###########################################################
+    ################# Output ##################################
+    ###########################################################
+    n=length(data_original$Y)
+    if(!is.null(new_points)){
+      m=length(new_points$X1)
+      hat_f = hat_f[(n+1):(n+m)]
+      lower = lower[(n+1):(n+m)]
+      upper = upper[(n+1):(n+m)]
+    }
+    
+    
+    return(list(hat_f = hat_f,
+                lower = lower, 
+                upper = upper,
+                new_points = new_points))
+  }
+  
+  
+  CQR <- function(X, Y, new_points,
+                  desired_coverage = 0.9,
+                  train_calib_split = 0.8,
+                  CQR_qr = 'auto',
+                  CQR_type = 'multiplicative') {
+    
+    # ------------------ Setup ------------------
+    if (CQR_qr == 'Naive') CQR_qr <- 'naive'
+    if (CQR_qr == 'auto') CQR_qr <- if (ncol(data.frame(X)) > 5) 'RF' else 'qGAM'
+    if (!CQR_qr %in% c('RF', 'qGAM', 'naive')) stop("Unsupported CQR_qr method")
+    
+    d <- ncol(data.frame(X))
+    X <- data.frame(X); Y <- as.numeric(Y)
+    new_points <- data.frame(new_points)
+    names(X) <- names(new_points) <- paste0("X", 1:d)
+    
+    # ------------------ Split ------------------
+    n <- nrow(X)
+    n_train <- floor(n * train_calib_split)
+    train_idx <- seq_len(n_train)
+    calib_idx <- seq.int(n_train + 1L, n)
+    
+    X_train <- data.frame(X[train_idx, ]); names(X_train) = names(X)
+    Y_train <- Y[train_idx]
+    X_calib <- data.frame(X[calib_idx, ]); names(X_calib) = names(X)
+    Y_calib <- Y[calib_idx]
+    
+    all_X <- rbind(X, new_points)
+    
+    # ------------------ Formula ------------------
+    create_formula <- function(X, smoothing = TRUE) {
+      terms <- sapply(1:ncol(X), function(j) {
+        if (length(unique(X[, j])) > 9 && smoothing) paste0("s(X", j, ")")
+        else paste0("as.factor(X", j, ")")
+      })
+      reformulate(terms, response = "Y")
+    }
+    
+    # ------------------ Fit model ------------------
+    if (CQR_qr == 'qGAM') {
+      formula <- create_formula(X_train)
+      invisible(capture.output({
+        fit_95 <- qgam(formula, data = data.frame(X_train, Y = Y_train), qu = (1 + desired_coverage) / 2)
+        fit_50 <- qgam(formula, data = data.frame(X_train, Y = Y_train), qu = 0.5)
+        fit_05 <- qgam(formula, data = data.frame(X_train, Y = Y_train), qu = (1 - desired_coverage) / 2)
+      }))
+      pred_95 <- predict(fit_95, newdata = all_X)
+      pred_50 <- predict(fit_50, newdata = all_X)
+      pred_05 <- predict(fit_05, newdata = all_X)
+    } else {
+      qrf <- quantregForest(x = X_train, y = Y_train, ntree = 1000, nodesize = 5)
+      pred_95 <- predict(qrf, newdata = all_X, what = (1 + desired_coverage) / 2)
+      pred_50 <- predict(qrf, newdata = all_X, what = 0.5)
+      pred_05 <- predict(qrf, newdata = all_X, what = (1 - desired_coverage) / 2)
+    }
+    
+    # ------------------ Enforce quantile order ------------------
+    pred_95 <- pmax(pred_95, pred_50)
+    pred_05 <- pmin(pred_05, pred_50)
+    
+    # ------------------ Calibration ------------------
+    n_calib <- length(Y_calib)
+    calib_idx_all <- calib_idx
+    
+    if (CQR_type == "multiplicative") {
+      l <- pred_50 - pred_05
+      u <- pred_95 - pred_50
+      scores <- mapply(function(i) {
+        idx <- calib_idx_all[i]
+        max((pred_50[idx] - Y_calib[i]) / l[idx], (Y_calib[i] - pred_50[idx]) / u[idx])
+      }, seq_len(n_calib))
+      gamma <- quantile(scores, probs = desired_coverage)
+      lower <- pred_50 - gamma * (pred_50 - pred_05)
+      upper <- pred_50 + gamma * (pred_95 - pred_50)
+      
+    } else if (CQR_type == "additive") {
+      scores <- mapply(function(i) {
+        idx <- calib_idx_all[i]
+        max(pred_05[idx] - Y_calib[i], Y_calib[i] - pred_95[idx])
+      }, seq_len(n_calib))
+      gamma <- quantile(scores, probs = desired_coverage)
+      lower <- pred_05 - gamma
+      upper <- pred_95 + gamma
+      
+    } else if (CQR_type == "naive") {
+      scores <- abs(pred_50[calib_idx_all] - Y_calib)
+      gamma <- quantile(scores, probs = desired_coverage)
+      lower <- pred_50 - gamma
+      upper <- pred_50 + gamma
+      
+    } else {
+      stop("Unsupported CQR_type. Use 'additive', 'multiplicative', or 'naive'")
+    }
+    
+    # ------------------ Output only new points ------------------
+    m <- nrow(new_points)
+    prediction_f <- tail(pred_50, m)
+    lower <- tail(lower, m)
+    upper <- tail(upper, m)
+    
+    list(
+      hat_f = prediction_f,
+      lower = lower,
+      upper = upper,
+      new_points = new_points
+    )
+  }
+  
+  
+  
+  PCS = function(X, Y, new_points, 
+                 desired_coverage = 0.9, train_calib_split = 0.8, 
+                 number_of_bootstraps = 30, symmetric_noise = TRUE) {
+    
+    # Data formatting and splitting
+    data_original = data.frame(X = X, Y = Y)
+    X = data.frame(X); Y = data.frame(Y)
+    d = ncol(X); if (is.null(nrow(X))) d = 1
+    names(data_original) = c(paste0("X", 1:d), "Y")
+    names(X) = paste0("X", 1:d)
+    new_points = data.frame(new_points); names(new_points) = c(paste0("X", 1:d))
+    my_sequence = rbind(X, new_points)
+    
+    n = nrow(Y)
+    n_train = floor(n * train_calib_split)
+    train = seq_len(n_train); calib = seq.int(n_train + 1L, n)
+    X_train = X[train, , drop = FALSE]; Y_train = Y[train,]
+    X_calib = X[calib, , drop = FALSE]; Y_calib = Y[calib,]
+    n_train = length(Y_train); n_calib = length(Y_calib)
+    index_sequences = (n_train + 1):(n_train + n_calib)
+    
+    create_formula = function(X, smoothing = TRUE) {
+      form = "Y ~ "
+      d = ncol(X); if (is.null(nrow(X))) d = 1
+      for (i in 1:d) {
+        if (!smoothing) {
+          form = paste(form, paste0("X", i, "+"))
+        } else if (length(unique(X[, i])) > 9) {
+          form = paste(form, paste0("s(X", i, ")+"))
+        } else {
+          form = paste(form, paste0("as.factor(X", i, ")+"))
+        }
+      }
+      form = substr(form, 1, nchar(form) - 1)
+      return(as.formula(form))
+    }
+    
+    # Epistemic estimation
+    X = X_train; Y = Y_train
+    n = length(Y)
+    data = data.frame(X = X_train, Y = Y_train)
+    names(data) = c(paste0("X", 1:d), "Y")
+    
+    PCS_estimates_gam = list(); PCS_estimates_locfit = list()
+    for (i in 1:number_of_bootstraps) {
+      data_b = data[sample(seq_len(nrow(data)), nrow(data), replace = TRUE),]
+      names(data_b) = c(paste0("X", 1:d), "Y")
+      fit = gam(create_formula(X), sp = 0, data = data_b)
+      preds = predict(fit, newdata = my_sequence)
+      PCS_estimates_gam[[i]] = preds
+      
+      if (d < 3) {
+        fit = locfit(create_formula(X, FALSE), data = data_b)
+        preds = predict(fit, newdata = my_sequence)
+        PCS_estimates_locfit[[i]] = preds
+      }
+    }
+    
+    PCS_mat = do.call(cbind, c(PCS_estimates_gam, PCS_estimates_locfit))
+    prediction_f = apply(PCS_mat, 1, median)
+    PCS_lower = apply(PCS_mat, 1, quantile, probs = 0.05)
+    PCS_upper = apply(PCS_mat, 1, quantile, probs = 0.95)
+    
+    estimate_gamma = function(f = prediction_f) {
+      score = sapply(1:n_calib, function(i) {
+        index = index_sequences[i]
+        max((f[index] - Y_calib[i]) / (f[index] - PCS_lower[index]),
+            (Y_calib[i] - f[index]) / (PCS_upper[index] - f[index]))
+      })
+      return(quantile(score, desired_coverage))
+    }
+    
+    gamma = estimate_gamma()
+    lower = prediction_f - gamma * (prediction_f - PCS_lower)
+    upper = prediction_f + gamma * (PCS_upper - prediction_f)
+    
+    # Restrict to prediction points
+    n = nrow(data_original)
+    m = nrow(new_points)
+    prediction_f = prediction_f[(n+1):(n+m)]
+    lower = lower[(n+1):(n+m)]
+    upper = upper[(n+1):(n+m)]
+    my_sequence = my_sequence[(n+1):(n+m),]
+    
+    return(list(hat_f = prediction_f,
+                lower = lower, 
+                upper = upper,
+                new_points = new_points))
+  }
+  
+  
+  CLEAR = function(X, Y, new_points, 
+                   minimum_lambda = 1, maximum_lambda = 10,  
+                   number_of_bootstraps = 30, desired_coverage = 0.9, 
+                   train_calib_split = 0.8, symmetric_noise = TRUE) {
+    
+    # Data formatting and splitting
+    data_original = data.frame(X = X, Y = Y)
+    X = data.frame(X); Y = data.frame(Y)
+    d = ncol(X); if (is.null(nrow(X))) d = 1
+    names(data_original) = c(paste0("X", 1:d), "Y")
+    names(X) = paste0("X", 1:d)
+    new_points = data.frame(new_points); names(new_points) = c(paste0("X", 1:d))
+    my_sequence = rbind(X, new_points)
+    
+    n = nrow(Y)
+    n_train = floor(n * train_calib_split)
+    train = seq_len(n_train); calib = seq.int(n_train + 1L, n)
+    X_train = X[train, , drop = FALSE]; Y_train = Y[train,]
+    X_calib = X[calib, , drop = FALSE]; Y_calib = Y[calib,]
+    n_train = length(Y_train); n_calib = length(Y_calib)
+    index_sequences = (n_train + 1):(n_train + n_calib)
+    
+    # Formula generator
+    create_formula = function(X, smoothing = TRUE) {
+      form = "Y ~ "
+      d = ncol(X); if (is.null(nrow(X))) d = 1
+      for (i in 1:d) {
+        if (!smoothing) {
+          form = paste(form, paste0("X", i, "+"))
+        } else if (length(unique(X[, i])) > 9) {
+          form = paste(form, paste0("s(X", i, ")+"))
+        } else {
+          form = paste(form, paste0("as.factor(X", i, ")+"))
+        }
+      }
+      form = substr(form, 1, nchar(form) - 1)
+      return(as.formula(form))
+    }
+    
+    # Step 1: Estimate aleatoric quantiles using bootstrapped qGAM
+    X = X_train; Y = Y_train
+    data = data.frame(X = X_train, Y = Y_train)
+    names(data) = c(paste0("X", 1:d), "Y")
+    
+    q05_mat = q50_mat = q95_mat = list()
+    invisible(capture.output({ #This should stop from printing to the console (verboise=FALSE doesnt work)
+      for (i in 1:number_of_bootstraps) {
+        data_b = data[sample(seq_len(nrow(data)), nrow(data), replace = TRUE),]
+        newdata = my_sequence
+        
+        q95_mat[[i]] = predict(qgam(create_formula(X), data = data_b, qu = (1 + desired_coverage) / 2), newdata)
+        q50_mat[[i]] = predict(qgam(create_formula(X), data = data_b, qu = 0.5), newdata)
+        q05_mat[[i]] = predict(qgam(create_formula(X), data = data_b, qu = (1 - desired_coverage) / 2), newdata)
+      }
+    }))
+    
+    q95_mat = do.call(cbind, q95_mat)
+    q50_mat = do.call(cbind, q50_mat)
+    q05_mat = do.call(cbind, q05_mat)
+    
+    for (i in 1:nrow(q95_mat)) {
+      for (j in 1:ncol(q95_mat)) {
+        q95_mat[i, j] = max(q95_mat[i, j], q50_mat[i, j])
+        q05_mat[i, j] = min(q50_mat[i, j], q05_mat[i, j])
+      }
+    }
+    
+    prediction_quant0.95 = rowMedians(q95_mat)
+    prediction_quant0.5 = rowMedians(q50_mat)
+    prediction_quant0.05 = rowMedians(q05_mat)
+    
+    # Step 2: Estimate epistemic uncertainty using gam and locfit
+    PCS_mat = list()
+    for (i in 1:number_of_bootstraps) {
+      data_b = data[sample(seq_len(nrow(data)), nrow(data), replace = TRUE),]
+      fit = gam(create_formula(X), sp = 0, data = data_b)
+      PCS_mat[[length(PCS_mat) + 1]] = predict(fit, newdata = my_sequence)
+      
+      if (d < 3) {
+        fit = locfit(create_formula(X, FALSE), data = data_b)
+        PCS_mat[[length(PCS_mat) + 1]] = predict(fit, newdata = my_sequence)
+      }
+    }
+    
+    PCS_mat = do.call(cbind, PCS_mat)
+    prediction_f_PCS = apply(PCS_mat, 1, median)
+    PCS_lower = apply(PCS_mat, 1, quantile, 0.05)
+    PCS_upper = apply(PCS_mat, 1, quantile, 0.95)
+    
+    # Step 3: Calibration for PCS_CQR
+    estimate_gamma = function(lambda, f = prediction_f_PCS) {
+      l = (prediction_quant0.5 - prediction_quant0.05) + lambda * (prediction_f_PCS - PCS_lower)
+      u = (prediction_quant0.95 - prediction_quant0.5) + lambda * (PCS_upper - prediction_f_PCS)
+      
+      score = sapply(1:n_calib, function(i) {
+        idx = index_sequences[i]
+        max((f[idx] - Y_calib[i]) / l[idx], (Y_calib[i] - f[idx]) / u[idx])
+      })
+      quantile(score, desired_coverage)
+    }
+    
+    estimate_optimal_lambda = function(min_lambda, max_lambda = 10) {
+      losses = sapply(seq(min_lambda, max_lambda, by = 0.1), function(lambda) {
+        gamma = estimate_gamma(lambda)
+        l = prediction_f_PCS - gamma * ((prediction_quant0.5 - prediction_quant0.05) + lambda * (prediction_f_PCS - PCS_lower))
+        u = prediction_f_PCS + gamma * ((prediction_quant0.95 - prediction_quant0.5) + lambda * (PCS_upper - prediction_f_PCS))
+        
+        mean(sapply(1:n_calib, function(i) {
+          idx = index_sequences[i]
+          0.05 * max(u[idx] - Y_calib[i], 0) +
+            0.95 * max(Y_calib[i] - u[idx], 0) +
+            0.95 * max(l[idx] - Y_calib[i], 0) +
+            0.05 * max(Y_calib[i] - l[idx], 0)
+        }))
+      })
+      seq(min_lambda, max_lambda, by = 0.1)[which.min(losses)]
+    }
+    
+    lambda = estimate_optimal_lambda(minimum_lambda, maximum_lambda)
+    gamma = estimate_gamma(lambda)
+    
+    PCS_CQR_lower = prediction_f_PCS - gamma * ((prediction_quant0.5 - prediction_quant0.05) + lambda * (prediction_f_PCS - PCS_lower))
+    PCS_CQR_upper = prediction_f_PCS + gamma * ((prediction_quant0.95 - prediction_quant0.5) + lambda * (PCS_upper - prediction_f_PCS))
+    
+    # Keep only prediction points
+    m = nrow(new_points)
+    prediction_f_PCS = prediction_f_PCS[(n + 1):(n + m)]
+    PCS_CQR_lower = PCS_CQR_lower[(n + 1):(n + m)]
+    PCS_CQR_upper = PCS_CQR_upper[(n + 1):(n + m)]
+    my_sequence = my_sequence[(n + 1):(n + m), ]
+    
+    return(list(hat_f = prediction_f_PCS,
+                lower = PCS_CQR_lower,
+                upper = PCS_CQR_upper,
+                new_points = new_points))
+  }
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  ####################################################################################
+  ############# Now we estimate prediction intervals for T=1 and T=0 and CATE ########
+  ####################################################################################
+  data0 = data[data$treatment==0,]
+  X_untreated = data0[, 1:d]; Y_untreated = data0$Y
+  data1 = data[data$treatment==1,]
+  X_treated = data1[, 1:d]; Y_treated = data1$Y
+  
+  if(conformal=='CQR' & weighted_conformal==TRUE){
+    estimate0 = CQR_weighted(X_untreated, Y_untreated, 
+                             treatment = data$treatment,
+                             X_all = X,  new_points,
+                    desired_coverage=desired_coverage, 
+                    our_weights = '1/(1-e)',
+                    train_calib_split = train_calib_split, 
+                    CQR_qr = CQR_qr, 
+                    CQR_type = CQR_type)
+    estimate1 = CQR_weighted(X_treated, Y_treated,
+                             treatment = data$treatment,
+                             X_all = X,    new_points,
+                    desired_coverage=desired_coverage, 
+                    our_weights = '1/e',
+                    train_calib_split = train_calib_split, 
+                    CQR_qr = CQR_qr, 
+                    CQR_type = CQR_type)
+  }
+  if(conformal=='CQR' & weighted_conformal==FALSE){
+    estimate0 = CQR(X_untreated, Y_untreated, new_points,
+                    desired_coverage=desired_coverage, 
+                    train_calib_split = train_calib_split, 
+                    CQR_qr = CQR_qr, 
+                    CQR_type = CQR_type)
+    estimate1 = CQR(X_treated, Y_treated, new_points,
+                    desired_coverage=desired_coverage, 
+                    train_calib_split = train_calib_split, 
+                    CQR_qr = CQR_qr, 
+                    CQR_type = CQR_type)
+  }
+  if(conformal=='naive'){
+    estimate0 = Naive_conformal(X_untreated, Y_untreated, new_points,
+                    desired_coverage=desired_coverage, 
+                    train_calib_split = train_calib_split, 
+                    CQR_qr = CQR_qr)
+    estimate1 = Naive_conformal(X_treated, Y_treated, new_points,
+                    desired_coverage=desired_coverage, 
+                    train_calib_split = train_calib_split, 
+                    CQR_qr = CQR_qr)
+  }
+  if(conformal=='PCS'){
+    estimate0 = PCS(X_untreated, Y_untreated, new_points,
+                    desired_coverage=desired_coverage, 
+                    train_calib_split = train_calib_split, 
+                    number_of_bootstraps = number_of_bootstraps)
+    estimate1 = PCS(X_treated, Y_treated, new_points,
+                    desired_coverage=desired_coverage, 
+                    train_calib_split = train_calib_split, 
+                    number_of_bootstraps = number_of_bootstraps)
+  }
+  if(conformal=='CLEAR'){
+    estimate0 = CLEAR(X_untreated, Y_untreated, new_points,
+                    desired_coverage=desired_coverage, 
+                    train_calib_split = train_calib_split, 
+                    number_of_bootstraps = number_of_bootstraps)
+    estimate1 = CLEAR(X_treated, Y_treated, new_points,
+                    desired_coverage=desired_coverage, 
+                    train_calib_split = train_calib_split, 
+                    number_of_bootstraps = number_of_bootstraps)
+  }
+  
+
+  
+  hat_f0 = estimate0$hat_f
+  lower0 = estimate0$lower
+  upper0 = estimate0$upper
+  lower_u0 = hat_f0 - estimate0$lower 
+  upper_u0 = estimate0$upper - hat_f0
+  my_sequence0 = estimate0$new_points
+  
+  # Extract second estimate details
+  hat_f1 = estimate1$hat_f
+  lower1 = estimate1$lower
+  upper1 = estimate1$upper
+  lower_u1 = hat_f1 - estimate1$lower 
+  upper_u1 = estimate1$upper - hat_f1
+  my_sequence1 = estimate1$new_points
+  
+  # Preserve the order and multiplicity of the requested prediction points.
+  my_sequence = new_points
+  
+  
+  
+  # The paper centers the outcome intervals at conditional-mean estimates.
+  # Naive_conformal uses mean regression; use the same fits in the bootstrap.
+  mean0 = Naive_conformal(X_untreated, Y_untreated, new_points,
+                          desired_coverage, train_calib_split, CQR_qr)
+  mean1 = Naive_conformal(X_treated, Y_treated, new_points,
+                          desired_coverage, train_calib_split, CQR_qr)
+  hat_f0 = mean0$hat_f; hat_f1 = mean1$hat_f
+  lower_u0 = pmax(hat_f0 - lower0, 0); upper_u0 = pmax(upper0 - hat_f0, 0)
+  lower_u1 = pmax(hat_f1 - lower1, 0); upper_u1 = pmax(upper1 - hat_f1, 0)
+  if(CATE_estimate=='T-learner'){CATE = hat_f1 - hat_f0}
+  
+  if(CATE_estimate=='Causal_forest'){
+    cf = causal_forest(X = as.matrix(X), 
+                       Y = data_original$Y, 
+                       W = as.numeric(treatment))
+    
+    CATE =  predict(cf,newdata = as.matrix(my_sequence))$predictions 
+  }
+
+  
+  ########################################################################################
+  ############## Finally, we compute the CATE confidence intervals #######################
+  ########################################################################################
+  if(add_confidence_intervals==TRUE){
+    
+    cate_hat_boot=list(); mean0_boot=list(); mean1_boot=list()
+    for(k in 1:number_of_bootstraps){
+      data_boot = data[sample(1:nrow(data_original), nrow(data_original), replace = TRUE),]
+      
+      if(CATE_estimate=='Causal_forest'){
+      cate_hat_boot[[k]] = predict(causal_forest(X=as.matrix(data_boot[, 1:d]), 
+                                                 Y = data_boot$Y, 
+                                                 W = data_boot$treatment),
+                                   newdata = as.matrix(my_sequence))$predictions
+      }
+      if(CATE_estimate=='T-learner'){
+        data0 = data_boot[data_boot$treatment==0,]
+        X_untreated = data0[, 1:d]; Y_untreated = data0$Y
+        data1 = data_boot[data_boot$treatment==1,]
+        X_treated = data1[, 1:d]; Y_treated = data1$Y
+        
+        estimate0 = Naive_conformal(X_untreated, Y_untreated, my_sequence,
+                        desired_coverage=desired_coverage, 
+                        train_calib_split = train_calib_split, 
+                        CQR_qr = CQR_qr)
+        estimate1 = Naive_conformal(X_treated, Y_treated, my_sequence,
+                        desired_coverage=desired_coverage, 
+                        train_calib_split = train_calib_split, 
+                        CQR_qr = CQR_qr)
+        mean0_boot[[k]] = estimate0$hat_f
+        mean1_boot[[k]] = estimate1$hat_f
+        cate_hat_boot[[k]] = estimate1$hat_f - estimate0$hat_f
+      }
+    } 
+    ci_probs = c((1-confidence_coverage)/2, (1+confidence_coverage)/2)
+    if(CATE_estimate=='T-learner'){
+      ci0 = apply(do.call(cbind, mean0_boot), 1, quantile, probs = ci_probs)
+      ci1 = apply(do.call(cbind, mean1_boot), 1, quantile, probs = ci_probs)
+      # Each arm's relevant one-sided radius is at most r/2 (conditional_beta).
+      CATE_lower_CI = 2*pmax(hat_f1 - ci1[1,], ci0[2,] - hat_f0, 0)
+      CATE_upper_CI = 2*pmax(hat_f0 - ci0[1,], ci1[2,] - hat_f1, 0)
+    }else{
+      # CATE-only CI: the theorem also requires equal conditional variances
+      # and a center equal to the difference of the two outcome mean estimates.
+      cate_hat_boot = apply(do.call(cbind, cate_hat_boot), 1, quantile, probs = ci_probs)
+      CATE_lower_CI = pmax(CATE - cate_hat_boot[1,], 0)
+      CATE_upper_CI = pmax(cate_hat_boot[2,] - CATE, 0)
+    }
+    
+    }
+
+
+  
+  
+  if(add_confidence_intervals==FALSE){
+    lower = CATE - rho_distance(lower_u1, upper_u0, rho)
+    upper = CATE + rho_distance(lower_u0, upper_u1, rho)
+  }else{
+    lower = CATE - rho_distance(lower_u1, upper_u0, rho) - CI_addition(CATE_lower_CI, lower_u1, upper_u0, rho)
+    upper = CATE + rho_distance(lower_u0, upper_u1, rho) + CI_addition(CATE_upper_CI, lower_u0, upper_u1, rho)
+  }
+  names(upper) = names(lower) = names(CATE) = paste0("new_point_", 1:nrow(data.frame(new_points)))
+  return(list(new_points = new_points, CATE = CATE, lower = lower, upper = upper))
+}
+
+
+
+
+
+
+
+#Do you want to compute CW_rho intervals for different Uncertainty estimation, or different CATE estimate? Its easy!
+#input estimate0, estimate1 and CATE in the following form:
+#   estimate0/estimate1 have f_hat (or hat_f), lower, upper and new_points.
+#   f_hat/hat_f must estimate the conditional mean, as in the paper.
+#   here, new_points are the points where we want to estimate ITEs (i.e. covariates in the test dataset)
+#   CATE is numeric, or has CATE, lower and upper columns; alternatively supply
+#   CATE_CI as a list/data.frame with lower and upper CI endpoints.
+#   The CI theorem with a CATE-only CI requires equal conditional variances
+#   and CATE = f_hat1 - f_hat0.
+#Output is a list with lower and upper prediction intervals, CATE and new_points.
+
+
+
+CW_rho_intervals_compute_yourself = function(estimate0, estimate1, CATE = NULL, 
+                           rho = 0, CATE_CI = NULL) {
+  rho_distance = function(x, y, rho)return(sqrt(pmax(x^2 + y^2 - 2*rho*x*y, 0)))
+  CI_addition = function(r, a, b, rho) {
+    # Exact c-star * r; computing the product avoids division by zero at r=0.
+    v_a = pmax(a - r/2, 0); v_b = pmax(b - r/2, 0)
+    return(ifelse(r == 0, 0, pmax(0,
+      rho_distance(v_a, v_b, rho) + (a - v_a) + (b - v_b) - rho_distance(a, b, rho))))
+  }
+  
+  prediction_f0 = if(!is.null(estimate0$f_hat)) estimate0$f_hat else estimate0$hat_f
+  lower0 = estimate0$lower
+  upper0 = estimate0$upper
+  lower_u0 = prediction_f0 - estimate0$lower 
+  upper_u0 = estimate0$upper - prediction_f0
+  my_sequence0 = estimate0$new_points
+  
+  # Extract second estimate details
+  prediction_f1 = if(!is.null(estimate1$f_hat)) estimate1$f_hat else estimate1$hat_f
+  lower1 = estimate1$lower
+  upper1 = estimate1$upper
+  lower_u1 = prediction_f1 - estimate1$lower 
+  upper_u1 = estimate1$upper - prediction_f1
+  my_sequence1 = estimate1$new_points
+  
+  # Both estimates must refer to the same rows in the same order.
+  if(!identical(data.frame(my_sequence0), data.frame(my_sequence1)))
+    stop("estimate0 and estimate1 must use the same ordered new_points")
+  new_points = my_sequence0
+  
+  
+  
+  if(is.null(CATE)){CATE = prediction_f1 - prediction_f0}#We use simple t-estimator unless specified otherwise
+  if(is.data.frame(CATE) || is.list(CATE)){
+    if(is.null(CATE_CI) && !is.null(CATE$lower))
+      CATE_CI = list(lower = CATE$lower, upper = CATE$upper)
+    CATE = CATE$CATE
+  }
+  CATE = as.numeric(CATE)
+  
+  
+  if(is.null(CATE_CI)){
+    lower = CATE - rho_distance(lower_u1, upper_u0, rho)
+    upper = CATE + rho_distance(lower_u0, upper_u1, rho)
+  }else{
+    CI_lower = pmax(CATE - CATE_CI$lower, 0)
+    CI_upper = pmax(CATE_CI$upper - CATE, 0)
+    lower = CATE - rho_distance(lower_u1, upper_u0, rho) - CI_addition(CI_lower, lower_u1, upper_u0, rho)
+    upper = CATE + rho_distance(lower_u0, upper_u1, rho) + CI_addition(CI_upper, lower_u0, upper_u1, rho)
+  }
+  
+  return(list(new_points = new_points, CATE = CATE, lower = lower, upper = upper))
+}
+
+
