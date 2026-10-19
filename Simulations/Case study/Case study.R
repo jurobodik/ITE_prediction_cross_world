@@ -1,4 +1,5 @@
 ## Real-covariate case study
+## This file reproduces all numbers from the Case Study section
 ## =====================================================================================
 
 suppressPackageStartupMessages({
