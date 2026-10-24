@@ -5,8 +5,9 @@
 # Methods: CW(rho), CW(rho - 0.25), CW^{+CI}_K(rho) with K = K_hat (Appendix 'Choice of K'), CMC, DR conformal,
 # the inexact and naive intervals of Lei and Candes, and the oracle interval.
 # Self-contained: needs no other file. Packages: mgcv, qgam, randomForest, quantregForest, gbm, MASS, ggplot2, patchwork.
-# Runtime on one core: about 1 h for 3 x 20 replications, plus about 25 min for the additive check.
+# Runtime on one core: no more than 24 hours
 # Usage: Rscript exp1_simulations_5.1.R      (resumable; outputs in OUT_DIR)
+# Original base created by Juraj Bodik, then cleaned up by Claude Opus 5.5
 ###############################################################################################
 OUT_DIR      <- "results_exp1"                          # cache, results (CSV), figures
 RUN_ADDITIVE <- TRUE                                    # Appendix C: setting (B) with purely additive GAMs
