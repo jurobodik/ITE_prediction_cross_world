@@ -1,5 +1,15 @@
 ## Real-covariate case study
 ## This file reproduces all numbers from the Case Study section
+## Reproduces Table tab_acic_main, Tables tab_acic_full, tab_acic_noise, tab_acic_xrobust, tab_acic_K (sensitivity
+## to K) and tab_acic_dgp, Figure acic_main_coverage_width.pdf and the numbers quoted in the text (numbers.txt).
+## CW^{+CI}_K(rho) uses K = K_hat (Appendix 'Choice of K'); K in {1, 2, Inf} is used only for Table tab_acic_K.
+## Self-contained: needs no other file; the data are downloaded on first use.
+## Packages: splines, quantreg, gbm, ranger, ggplot2, patchwork.
+## Usage:  Rscript exp3_case_study_5.3.R                  all three studies, then tables and figure (one core: ~3 h)
+##         Rscript exp3_case_study_5.3.R --study main     one study (main: 10 DGPs x 20 replications; noise:
+##                                                        3 settings x 10 x 3; xrobust: 10 x 2, six covariates)
+##         Rscript exp3_case_study_5.3.R --study tables   tables, figure and numbers from the finished studies
+## Resumable: each replication is written to <out>/<study>/rows_<seed>.csv (default out: results_exp3).
 ## =====================================================================================
 
 suppressPackageStartupMessages({
@@ -19,7 +29,7 @@ N_CI_BOOT <- 100     # bootstrap draws for the CI of the CATE center
 N_RHO_BOOT <- 50     # bootstrap draws (with refitting) for rho^boot_{L,delta}
 DELTA_G <- 0.01      # calibrated variant: 99% Gaussian lower confidence bound for rho_L ...
 BETA_G <- 0.01       # ... a 99% CI for the CATE term ...
-LEVEL_G <- round((1 - ALPHA) / ((1 - BETA_G) * (1 - DELTA_G)), 6)  # ... marginal level, (1-a)(1-b)(1-d) = 0.9
+LEVEL_G <- round((1 - ALPHA) / ((1 - BETA_G) * (1 - DELTA_G)), 6)  # not used by the calibrated variant any more (see lev_cal)
 NB_MAX <- 5          # number of covariate bins for conditional coverage
 
 CPP_NAMES <- c(
@@ -341,6 +351,8 @@ marginal_cqr <- function(x, y, x_new, levels = c(0.90, 0.95), trainprop = 0.8, n
     list(l = pmax(cc - lo, fl), u = pmax(hi - cc, fl))
   }
   out <- list(m = c_n)
+  rs <- abs(y[ca] - c_c); bsig <- ols_coef(Bca, rs)                 # sigma_t for K_hat (Appendix 'Choice of K')
+  out$sigma <- pmax(drop(Bn %*% bsig), 0.05 * mean(rs))
   for (l in levels) {
     a <- round((1 - l) / 2, 6)
     b <- round((1 + l) / 2, 6)
@@ -373,7 +385,7 @@ ci_from_boot <- function(c0, c1, beta = BETA_CI) {
 }
 
 ## CW(rho) of Definition 2: [tau - D(l1,u0), tau + D(l0,u1)];  CW^{+CI} adds c* r_l and c* r_u
-## (Theorem theorem_CI, one constant per end).  swapped = TRUE: width assignment of the old repo code
+## (Theorem theorem_CI, one constant per end).
 ## normal-approximation version of (conditional_beta) for small beta: r = 2 z_{1-beta/2} max_t se_t(x),
 ## se_t = bootstrap standard error of the same median fit (percentiles at beta/2 need far more draws)
 ci_gauss <- function(c0, c1, beta) {
@@ -381,20 +393,21 @@ ci_gauss <- function(c0, c1, beta) {
   list(rl = r, ru = r)
 }
 
-cw <- function(tau, c0, c1, rho, ci = NULL, swapped = FALSE) {
-  if (swapped) {
-    al <- c0$l; bl <- c1$u; au <- c0$u; bu <- c1$l
-  } else {
-    al <- c1$l; bl <- c0$u; au <- c0$l; bu <- c1$u
-  }
-  L <- tau - Dfun(al, bl, rho)
-  U <- tau + Dfun(au, bu, rho)
-  if (!is.null(ci)) {
-    L <- L - c_star(al, bl, ci$rl, rho) * ci$rl
-    U <- U + c_star(au, bu, ci$ru, rho) * ci$ru
-  }
-  list(L = L, U = U)
+## CW(rho) and CW^{+CI}_K(rho) of the current paper: D_{rho,K}(a,b) = max{D_rho(a,b), lambda a, lambda b},
+## lambda^2 = 1 - 1/K^2 - (2/K)(rho - 1/K)_+ (lambda = 1 if K = Inf), and c = c*(x), so that
+## U = tau + r_u + D_{rho,K}((l_0 - r_u/2)_+, (u_1 - r_u/2)_+),  L = tau - r_l - D_{rho,K}((l_1 - r_l/2)_+, (u_0 - r_l/2)_+).
+lambda_rhoK <- function(rho, K) ifelse(is.infinite(K), 1, sqrt(pmax(1 - 1 / K^2 - (2 / K) * pmax(rho - 1 / K, 0), 0)))
+DrhoK <- function(a, b, rho, K) pmax(Dfun(a, b, rho), lambda_rhoK(rho, K) * pmax(a, b))
+cw <- function(tau, c0, c1, rho, ci = NULL, K = Inf) {
+  al <- c1$l; bl <- c0$u; au <- c0$l; bu <- c1$u
+  if (is.null(ci)) return(list(L = tau - Dfun(al, bl, rho), U = tau + Dfun(au, bu, rho)))
+  list(L = tau - ci$rl - DrhoK(pmax(al - ci$rl / 2, 0), pmax(bl - ci$rl / 2, 0), rho, K),
+       U = tau + ci$ru + DrhoK(pmax(au - ci$ru / 2, 0), pmax(bu - ci$ru / 2, 0), rho, K))
 }
+## Calibrated variant: error budget valid for a general bound K. Arm intervals at level 1 - alpha_0(K),
+## alpha_0 = alpha_1 = (eps + [1 - K(1 - eps)]_+)/2, eps = ALPHA - BETA_G - DELTA_G (bracket = 0 if K = Inf).
+EPS_CAL <- ALPHA - BETA_G - DELTA_G
+lev_cal <- function(K) round(1 - (EPS_CAL + (if (is.infinite(K)) 0 else max(1 - K * (1 - EPS_CAL), 0))) / 2, 6)
 
 ## Lei & Candes (2021) nested approach, inexact (cfcausal defaults: cfprop = 0.5, counterfactual
 ## CQR at level 1 - alpha with trainprop = 0.75, loquantile = 0.4, upquantile = 0.6)
@@ -575,22 +588,34 @@ one_replication <- function(W, dgp, xvars, noise, rho_eps, seed, full, learner, 
     n1 <- c1[["0.95"]]
     ci <- ci_from_boot(c0, c1)
     
+    kap <- c1$sigma / c0$sigma
+    Khat <- max(1, stats::quantile(pmax(kap, 1 / kap), 0.9, names = FALSE))   # K_hat (Appendix 'Choice of K')
     ints <- list()
     ints[["Oracle ITE quantiles"]] <- list(L = q_lo, U = q_hi)          # unattainable reference
     ints[["Lei naive"]] <- list(L = tau - (n1$l + n0$u), U = tau + (n0$l + n1$u))
-    ints[["CW+CI(0)"]] <- cw(tau, a0, a1, 0, ci)
-    ints[["CW+CI(0.5)"]] <- cw(tau, a0, a1, 0.5, ci)
     ints[["CW(rhoL)"]] <- cw(tau, a0, a1, rho_te$rhoL)
-    ints[["CW+CI(rhoL)"]] <- cw(tau, a0, a1, rho_te$rhoL, ci)
-    if (!is.null(rho_te$rhoL_boot)) ints[["CW+CI(rhoL_boot)"]] <- cw(tau, a0, a1, rho_te$rhoL_boot, ci)
-    if (!is.null(rho_te$rhoL_g01))     # calibrated variant: marginals at LEVEL_G, 99% CI, 99% bound
-      ints[["CW+CI(rhoL_g01,cal)"]] <- cw(tau, c0[[as.character(LEVEL_G)]], c1[[as.character(LEVEL_G)]],
-                                          rho_te$rhoL_g01, ci_gauss(c0, c1, BETA_G))
-    ints[["CW+CI(rhoTL)"]] <- cw(tau, a0, a1, rho_te$rhoTL, ci)
-    ints[["CW+CI(rhoImp)"]] <- cw(tau, a0, a1, rho_te$rhoImp, ci)
     ints[["CW(oracle)"]] <- cw(tau, a0, a1, rho_te$oracle)
-    ints[["CW+CI(oracle)"]] <- cw(tau, a0, a1, rho_te$oracle, ci)
-    ints[["CW+CI(rhoL) swapped"]] <- cw(tau, a0, a1, rho_te$rhoL, ci, swapped = TRUE)
+    specs <- list("CW+CI(0)" = list(0, a0, a1, ci), "CW+CI(0.5)" = list(0.5, a0, a1, ci),
+                  "CW+CI(rhoL)" = list(rho_te$rhoL, a0, a1, ci), "CW+CI(rhoTL)" = list(rho_te$rhoTL, a0, a1, ci),
+                  "CW+CI(rhoImp)" = list(rho_te$rhoImp, a0, a1, ci), "CW+CI(oracle)" = list(rho_te$oracle, a0, a1, ci))
+    if (!is.null(rho_te$rhoL_boot)) specs[["CW+CI(rhoL_boot)"]] <- list(rho_te$rhoL_boot, a0, a1, ci)
+    for (nm in names(specs)) {
+      s <- specs[[nm]]
+      ints[[nm]] <- cw(tau, s[[2]], s[[3]], s[[1]], s[[4]], K = Khat)            # reported: K = K_hat
+      for (kk in c(1, 2, Inf))                                                   # sensitivity analysis (appendix)
+        ints[[sprintf("%s [K=%s]", nm, format(kk))]] <- cw(tau, s[[2]], s[[3]], s[[1]], s[[4]], K = kk)
+    }
+    if (!is.null(rho_te$rhoL_g01)) {   # calibrated variant: 99% bound for rho_L, 99% CI, arm level 1 - alpha_0(K)
+      Kc <- list(Khat = Khat, "1" = 1, "2" = 2, "Inf" = Inf); levs <- sapply(Kc, lev_cal)
+      set.seed(7000000 + seed + 100000 * match(xv, CPP_NAMES))   # same split and bootstrap as c0 and c1 above
+      g0 <- marginal_cqr(x_tr[T == 0], Y[T == 0], x_te, levels = sort(unique(levs)), n_boot = N_CI_BOOT)
+      g1 <- marginal_cqr(x_tr[T == 1], Y[T == 1], x_te, levels = sort(unique(levs)), n_boot = N_CI_BOOT)
+      cig <- ci_gauss(c0, c1, BETA_G)
+      for (k in names(Kc)) {
+        nm <- if (k == "Khat") "CW+CI(rhoL_g01,cal)" else sprintf("CW+CI(rhoL_g01,cal) [K=%s]", k)
+        ints[[nm]] <- cw(tau, g0[[as.character(levs[[k]])]], g1[[as.character(levs[[k]])]], rho_te$rhoL_g01, cig, K = Kc[[k]])
+      }
+    }
     if (full) {
       set.seed(8000000 + seed + 100000 * match(xv, CPP_NAMES))
       ints[["Lei nested"]] <- lei_nested_inexact(x_tr, T, Y, x_te)
@@ -599,13 +624,14 @@ one_replication <- function(W, dgp, xvars, noise, rho_eps, seed, full, learner, 
     }
     
     bb <- make_bins(xv, x_pop, x_te)
-    rho_used <- list("CW+CI(0)" = 0, "CW+CI(0.5)" = 0.5, "CW(rhoL)" = rho_te$rhoL,
-                     "CW+CI(rhoL)" = rho_te$rhoL, "CW+CI(rhoL_boot)" = rho_te$rhoL_boot, "CW+CI(rhoL_g01,cal)" = rho_te$rhoL_g01,
-                     "CW+CI(rhoTL)" = rho_te$rhoTL, "CW+CI(rhoImp)" = rho_te$rhoImp,
-                     "CW(oracle)" = rho_te$oracle, "CW+CI(oracle)" = rho_te$oracle)
+    rho_used <- list("CW(rhoL)" = rho_te$rhoL, "CW(oracle)" = rho_te$oracle)
+    for (nm in names(specs)) for (suffix in c("", sprintf(" [K=%s]", format(c(1, 2, Inf)))))
+      rho_used[[paste0(nm, suffix)]] <- specs[[nm]][[1]]
+    if (!is.null(rho_te$rhoL_g01)) for (suffix in c("", " [K=1]", " [K=2]", " [K=Inf]"))
+      rho_used[[paste0("CW+CI(rhoL_g01,cal)", suffix)]] <- rho_te$rhoL_g01
     has_b <- !is.null(est$rhoL_boot)
     base <- list(dgp = dgp$id, xvar = xv, noise = noise, rho_eps = rho_eps, sigma = sigma,
-                 seed = seed, r2_mu0 = r2[1], r2_mu1 = r2[2], t_nuis = t_nuis, t_lcb = t_lcb,
+                 seed = seed, Khat = Khat, r2_mu0 = r2[1], r2_mu1 = r2[2], t_nuis = t_nuis, t_lcb = t_lcb,
                  rho_oracle_mean = mean(rho_te$oracle), rhoL_true_mean = mean(rho_te$oracle_rhoL),
                  rhoL_mean = mean(rho_te$rhoL), rhoTL_mean = mean(rho_te$rhoTL),
                  rhoImp_mean = mean(rho_te$rhoImp),
@@ -646,7 +672,7 @@ collect <- function(out, study) {
 }
 
 parse_args <- function(args) {
-  opt <- list(study = "main", reps = "15", dgps = "1,2,3,4,5,6,7,8,9,10", out = "results_R",
+  opt <- list(study = "all", reps = NA, dgps = "1,2,3,4,5,6,7,8,9,10", out = "results_exp3",
               data_dir = "acic_data", learner = "gbm", lcb_reps = NA, lcb_B = as.character(N_RHO_BOOT),
               collect_only = FALSE)
   i <- 1
@@ -664,14 +690,11 @@ parse_args <- function(args) {
       i <- i + 2
     }
   }
-  opt$reps <- as.integer(opt$reps)
   opt$lcb_B <- as.integer(opt$lcb_B)
-  opt$lcb_reps <- if (is.na(opt$lcb_reps)) (if (opt$study == "main") 3L else 0L) else as.integer(opt$lcb_reps)
   opt
 }
 
-main <- function(args = commandArgs(trailingOnly = TRUE)) {
-  opt <- parse_args(args)
+run_study <- function(opt) {
   if (opt$collect_only) {
     collect(opt$out, opt$study)
     return(invisible(NULL))
@@ -724,6 +747,195 @@ main <- function(args = commandArgs(trailingOnly = TRUE)) {
     }
   }
   collect(opt$out, opt$study)
+}
+
+
+## =====================================================================================
+## Tables, figure and numbers
+## =====================================================================================
+make_tables <- function(RES, OUT, data_dir = "acic_data") {
+  suppressPackageStartupMessages({ library(ggplot2); library(patchwork) })
+  dir.create(OUT, recursive = TRUE, showWarnings = FALSE)
+  WIDTH_COL <- "width"
+  prt <- function(m, v) sprintf("%-22s %s", m, paste(sprintf("%.3f", v), collapse = " "))
+read_study <- function(study) {
+  fs <- Sys.glob(file.path(RES, study, "rows_*.csv"))
+  if (!length(fs)) return(NULL)
+  dfs <- lapply(fs, utils::read.csv, stringsAsFactors = FALSE, check.names = FALSE)
+  cols <- unique(unlist(lapply(dfs, names)))
+  do.call(rbind, lapply(dfs, function(z) { for (cc in setdiff(cols, names(z))) z[[cc]] <- NA; z[cols] }))
+}
+gm <- function(v) exp(mean(log(v)))
+
+## one row of the tables for method m within D (one configuration and one covariate X)
+summ <- function(D, m, wcol = WIDTH_COL) {
+  d <- D[D$method == m, ]
+  if (!nrow(d)) return(rep(NA_real_, 6))
+  key <- paste(d$seed, d$xvar)
+  ref <- function(name, col) { r <- D[D$method == name, ]; r[[col]][match(key, paste(r$seed, r$xvar))] }
+  c(mean = mean(d$coverage), worst_dgp = min(tapply(d$coverage, d$dgp, mean)),
+    worst_bin = mean(d$worst_bin_cov, na.rm = TRUE),
+    w_true = gm(d[[wcol]] / ref("Oracle ITE quantiles", wcol)), w_naive = gm(d[[wcol]] / ref("Lei naive", wcol)),
+    s_naive = gm(d$iscore / ref("Lei naive", "iscore")))
+}
+LAB <- c("Lei naive" = "Naive", "Lei nested" = "Lei--Cand\\`es nested", "CMC" = "CMC",
+         "DR-conformal" = "DR conformal", "CW+CI(0)" = "$CW^{+CI}(0)$", "CW+CI(0.5)" = "$CW^{+CI}(0.5)$",
+         "CW(rhoL)" = "$CW(\\widehat\\rho_L)$", "CW+CI(rhoL)" = "$CW^{+CI}(\\widehat\\rho_L)$",
+         "CW+CI(rhoL_g01,cal)" = "$CW^{+CI}_{\\mathrm{cal}}(\\widehat\\rho^{\\mathrm{gauss}}_{L,0.01})^{\\dagger}$",
+         "CW+CI(rhoTL)" = "$CW^{+CI}(\\widehat{\\tilde\\rho}_L)$", "CW+CI(rhoImp)" = "$CW^{+CI}(\\widehat\\rho_{\\mathrm{imp}})$",
+         "CW(oracle)" = "$CW(\\rho)$, oracle", "CW+CI(oracle)" = "$CW^{+CI}(\\rho)$, oracle",
+         "Oracle ITE quantiles" = "True ITE quantiles")
+FULL_GROUPS <- list(c("Lei naive", "Lei nested", "CMC", "DR-conformal"),
+                    c("CW+CI(0)", "CW+CI(0.5)", "CW(rhoL)", "CW+CI(rhoL)", "CW+CI(rhoL_g01,cal)", "CW+CI(rhoTL)", "CW+CI(rhoImp)"),
+                    c("CW(oracle)", "CW+CI(oracle)"), "Oracle ITE quantiles")
+## published Table tab_acic_full (previous rule), for validation of the rerun
+fmt_row <- function(lab, v, cols = 1:6) {
+  f <- c("%.3f", "%.3f", "%.3f", "%.2f", "%.2f", "%.2f")[cols]
+  paste0(lab, " & ", paste(mapply(function(x, ff) if (is.na(x)) "--" else sprintf(ff, x), v[cols], f), collapse = " & "), " \\\\")
+}
+M <- read_study("main")
+if (!is.null(M)) {
+  M <- M[M$xvar == "gest_delivery", ]
+  nrep <- tapply(M$seed[M$method == "Lei naive"], M$dgp[M$method == "Lei naive"], length)
+  cat(sprintf("== main: %d replications (per DGP: %s)\n", sum(nrep), paste(nrep, collapse = ",")))
+
+  ## Table tab_acic_full (revised rule)
+  rows <- unlist(lapply(seq_along(FULL_GROUPS), function(k) c(if (k > 1) "\\midrule",
+    vapply(FULL_GROUPS[[k]], function(m) fmt_row(LAB[[m]], summ(M, m)), ""))))
+  writeLines(rows, file.path(OUT, "tab_acic_full_body.tex"))
+
+  ## Table tab_acic_main (main text): columns = methods
+  MAIN_COLS <- c("Lei naive", "Lei nested", "CMC", "DR-conformal", "CW+CI(0.5)", "CW(rhoL)", "CW+CI(rhoL)",
+                 "CW+CI(rhoTL)", "CW+CI(rhoL_g01,cal)")
+  SM <- sapply(MAIN_COLS, function(m) summ(M, m))
+  writeLines(c(paste0("Coverage (mean, \\%)\n& ", paste(sprintf("%.1f", 100 * SM["mean", ]), collapse = " & "), " \\\\"),
+               paste0("Coverage (min, \\%)\n& ", paste(sprintf("%.1f", 100 * SM["worst_dgp", ]), collapse = " & "), " \\\\"),
+               paste0("Width ${\\scriptstyle\\downarrow}$\n& ", paste(sprintf("%.2f", SM["w_naive", ]), collapse = " & "), " \\\\"),
+               paste0("Interval score ${\\scriptstyle\\downarrow}$\n& ", paste(sprintf("%.2f", SM["s_naive", ]), collapse = " & "), " \\\\")),
+             file.path(OUT, "tab_acic_main_body.tex"))
+  od <- order(tapply(M$rho_oracle_mean, M$dgp, mean))
+  dg <- as.integer(names(tapply(M$rho_oracle_mean, M$dgp, mean))[od])
+  ## Figure fig_acic_main: by DGP, ordered by rho-bar
+  FM <- c("Lei naive", "Lei nested", "CMC", "DR-conformal", "CW+CI(0)", "CW+CI(0.5)", "CW+CI(rhoL)", "CW+CI(oracle)")
+  FL <- c("Lei-Candes naive", "Lei-Candes nested (inexact)", "CMC (Jonkers et al.)", "DR conformal (Alaa et al.)",
+          "CW+CI(0)", "CW+CI(0.5)", "CW+CI(rhoL)", "CW+CI(rho), oracle rho")
+  FLX <- c(FL[1:4], expression(CW^{"+CI"}*(0)), expression(CW^{"+CI"}*(0.5)), expression(CW^{"+CI"}*(hat(rho)[L])),
+           expression(CW^{"+CI"}*(rho)*", oracle"~rho))
+  FC <- c("grey50", "#8c564b", "#9467bd", "#bcbd22", "#17becf", "#1f77b4", "#d62728", "black")
+  FS <- c(16, 16, 16, 16, 15, 15, 15, 15)
+  P <- do.call(rbind, lapply(FM, function(m) {
+    d <- M[M$method == m, ]; key <- d$seed
+    r <- M[M$method == "Oracle ITE quantiles", ]; j <- match(key, r$seed)
+    data.frame(method = m, dgp = d$dgp, cov = d$coverage, wr = d$width / r$width[j], sr = d$iscore / r$iscore[j])
+  }))
+  A <- do.call(rbind, lapply(split(P, list(P$method, P$dgp)), function(d) data.frame(method = d$method[1], dgp = d$dgp[1],
+    cov = mean(d$cov), sd = sd(d$cov), wr = gm(d$wr), sr = gm(d$sr))))
+  rb <- tapply(M$rho_oracle_mean, M$dgp, mean)
+  A$dgp_lab <- factor(sprintf("DGP %d\nrho=%.2f", A$dgp, rb[as.character(A$dgp)]),
+                      levels = sprintf("DGP %d\nrho=%.2f", dg, rb[as.character(dg)]))
+  A$method <- factor(A$method, levels = FM)
+  pd <- position_dodge(width = 0.8)
+  base <- function(y) ggplot(A, aes(dgp_lab, .data[[y]], colour = method, shape = method)) +
+    scale_colour_manual(values = setNames(FC, FM), labels = FLX, name = NULL) +
+    scale_shape_manual(values = setNames(FS, FM), labels = FLX, name = NULL) +
+    theme_bw(base_size = 9) + theme(legend.position = "top", panel.grid.minor = element_blank()) +
+    guides(colour = guide_legend(nrow = 2), shape = guide_legend(nrow = 2))
+  g1 <- base("cov") + geom_hline(yintercept = 0.9, linetype = "dashed") +
+    geom_errorbar(aes(ymin = cov - sd, ymax = cov + sd), position = pd, width = 0) + geom_point(position = pd, size = 1.6) +
+    labs(x = NULL, y = "coverage of Y(1) - Y(0)") + theme(axis.text.x = element_blank())
+  g2 <- base("wr") + geom_hline(yintercept = 1, linetype = "dotted") + geom_point(position = pd, size = 1.6) +
+    scale_y_continuous(trans = "log2") + labs(x = NULL, y = "mean width / width of\ntrue 90% ITE interval") +
+    theme(axis.text.x = element_blank(), legend.position = "none")
+  g3 <- base("sr") + geom_hline(yintercept = 1, linetype = "dotted") + geom_point(position = pd, size = 1.6) +
+    scale_y_continuous(trans = "log2") + labs(x = "ACIC-2016 data-generating process, ordered by the true cross-world correlation E[rho(X)]",
+                                               y = "mean interval score /\nscore of true ITE interval") + theme(legend.position = "none")
+  ggsave(file.path(OUT, "acic_main_coverage_width.pdf"), g1 / g2 / g3, width = 7.5, height = 8)
+}
+NO <- read_study("noise")
+if (!is.null(NO) && length(unique(NO$seed)) < 90) {   # only complete studies are tabulated
+  cat(sprintf("\n== noise: %d of 90 replications so far, not tabulated\n", length(unique(NO$seed)))); NO <- NULL }
+if (!is.null(NO)) {
+  NM <- c("Lei naive", "CW+CI(0)", "CW+CI(0.5)", "CW+CI(rhoL)", "CW+CI(rhoTL)", "CW+CI(rhoImp)", "CW+CI(oracle)")
+  cat(sprintf("\n== noise: %d replications\n", length(unique(NO$seed))))
+  rows <- character(0)
+  for (re in c(-0.5, 0, 0.5)) {
+    D <- NO[abs(NO$rho_eps - re) < 1e-9, ]
+    rows <- c(rows, if (length(rows)) "\\midrule",
+              sprintf("\\multicolumn{7}{l}{\\textit{Residual correlation $\\rho_{\\varepsilon}=%s$}} \\\\", format(re)),
+              vapply(NM, function(m) fmt_row(LAB[[m]], summ(D, m)), ""))
+    cat(sprintf("rho_eps = %+.1f\n", re))
+    for (m in NM[-1]) cat("  ", prt(m, summ(D, m)), "\n")
+  }
+  writeLines(rows, file.path(OUT, "tab_acic_noise_body.tex"))
+  cat("pooled over rho_eps:\n")
+  for (m in c("CW+CI(rhoL)", "CW+CI(rhoTL)")) cat("  ", prt(m, summ(NO, m)), "\n")
+}
+XR <- read_study("xrobust")
+if (!is.null(XR) && length(unique(XR$seed)) < 20) {   # only complete studies are tabulated
+  cat(sprintf("\n== xrobust: %d of 20 replications so far, not tabulated\n", length(unique(XR$seed)))); XR <- NULL }
+if (!is.null(XR)) {
+  XM <- c("Lei naive", "CW+CI(0)", "CW+CI(0.5)", "CW+CI(rhoL)", "CW+CI(rhoTL)", "CW+CI(oracle)")
+  XN <- c(gest_delivery = "Gestational age at delivery", mom_age = "Maternal age", mom_weight_prior = "Prior maternal weight",
+          bayley_mental = "Bayley mental score", placental_weight = "Placental weight", child_hematocrit = "Child hematocrit")
+  cat(sprintf("\n== xrobust: %d replications\n", length(unique(XR$seed))))
+  rows <- character(0); rl <- NULL
+  for (xv in names(XN)) {
+    D <- XR[XR$xvar == xv, ]
+    if (!nrow(D)) next
+    rows <- c(rows, if (length(rows)) "\\midrule", sprintf("\\multicolumn{6}{l}{\\textit{$X$: %s}} \\\\", XN[[xv]]),
+              vapply(XM, function(m) fmt_row(LAB[[m]], summ(D, m), cols = c(1, 2, 4, 5, 6)), ""))
+    rl <- rbind(rl, data.frame(xv = xv, t(summ(D, "CW+CI(rhoL)")), w05 = summ(D, "CW+CI(0.5)")[["worst_dgp"]]))
+  }
+  writeLines(rows, file.path(OUT, "tab_acic_xrobust_body.tex"))
+  cat(sprintf("CW+CI(rhoL) across X: mean cov %.3f-%.3f, worst DGP %.3f-%.3f, width/naive %.3f-%.3f, score/naive %.3f-%.3f; CW+CI(0.5) worst DGP %.3f-%.3f\n",
+              min(rl$mean), max(rl$mean), min(rl$worst_dgp), max(rl$worst_dgp), min(rl$w_naive), max(rl$w_naive),
+              min(rl$s_naive), max(rl$s_naive), min(rl$w05), max(rl$w05)))
+}
+
+  ## Table tab_acic_K (appendix): sensitivity of the baseline study to K; Table tab_acic_dgp
+  if (!is.null(M)) {
+    MET <- c("CW+CI(0.5)" = "$CW^{+CI}(0.5)$", "CW+CI(rhoL)" = "$CW^{+CI}(\\widehat\\rho_L)$",
+             "CW+CI(rhoTL)" = "$CW^{+CI}(\\widehat{\\tilde\\rho}_L)$",
+             "CW+CI(rhoL_g01,cal)" = "$CW^{+CI}_{\\mathrm{cal}}(\\widehat\\rho^{\\mathrm{gauss}}_{L,0.01})^{\\dagger}$",
+             "CW+CI(rhoImp)" = "$CW^{+CI}(\\widehat\\rho_{\\mathrm{imp}})$", "CW+CI(oracle)" = "$CW^{+CI}(\\rho)$, oracle")
+    KS <- c(" [K=1]" = "$K=1$", " [K=2]" = "$K=2$", "Khat" = "$K=\\widehat K$", " [K=Inf]" = "$K=\\infty$")
+    suf <- function(k) if (k == "Khat") "" else k
+    rows <- character(0)
+    for (m in names(MET)) {
+      if (length(rows)) rows <- c(rows, "\\midrule")
+      for (k in names(KS)) { v <- summ(M, paste0(m, suf(k))); if (all(is.na(v))) next
+        rows <- c(rows, sprintf("%s & %s & %.3f & %.3f & %.3f & %.2f & %.2f & %.2f \\\\", if (k == names(KS)[1]) MET[[m]] else "",
+                                KS[[k]], v[1], v[2], v[3], v[4], v[5], v[6])) }
+    }
+    writeLines(rows, file.path(OUT, "tab_acic_K_body.tex"))
+    cat("\n== sensitivity to K, CW+CI(rhoL): mean cov, worst DGP, worst bin, width/true, width/naive, score/naive\n")
+    for (k in names(KS)) cat(sprintf("  %-14s %s\n", KS[[k]], prt("CW+CI(rhoL)", summ(M, paste0("CW+CI(rhoL)", suf(k))))))
+    kh <- M[M$method == "CW+CI(rhoL)", ]
+    cat("== K_hat by DGP (median over replications):", paste(sprintf("DGP %d: %.2f", as.integer(names(tapply(kh$Khat, kh$dgp, median))),
+        tapply(kh$Khat, kh$dgp, median)), collapse = "; "), "\n")
+    dat <- load_acic(data_dir); rb <- tapply(kh$rho_oracle_mean, kh$dgp, mean); ids <- as.integer(names(rb))[order(rb)]
+    dg <- lapply(ids, function(i) Filter(function(d) d$id == i, dat$dgps)[[1]])
+    av <- function(col) tapply(kh[[col]], kh$dgp, mean)[as.character(ids)]
+    writeLines(sprintf("%d & %.2f & %.2f & %.2f & %.2f & %.2f & %.2f & %.2f \\\\", ids,
+                       sapply(dg, function(d) sd_pop(d$mu1 - d$mu0)), sapply(dg, function(d) cor(d$mu0, d$mu1)),
+                       av("rho_oracle_mean"), av("rhoL_mean"), av("rhoTL_mean"), av("rhoImp_mean"), av("frac_rhoL_below_oracle")),
+               file.path(OUT, "tab_acic_dgp_body.tex"))
+    cat("tab_acic_dgp_body.tex columns: DGP, sd(mu1 - mu0), cor(mu0, mu1), rho-bar, rhoL_hat, rhoTL_hat, rhoImp_hat, share below\n")
+  }
+}
+
+main <- function(args = commandArgs(trailingOnly = TRUE)) {
+  opt <- parse_args(args)
+  studies <- switch(opt$study, all = c("main", "noise", "xrobust"), tables = character(0), opt$study)
+  for (st in studies) {                                      # paper settings unless --reps / --lcb_reps are given
+    o <- opt; o$study <- st
+    o$reps <- if (is.na(opt$reps)) c(main = 20L, noise = 3L, xrobust = 2L)[[st]] else as.integer(opt$reps)
+    o$lcb_reps <- if (is.na(opt$lcb_reps)) (if (st == "main") 2L else 0L) else as.integer(opt$lcb_reps)
+    run_study(o)
+  }
+  sink(file.path(opt$out, "numbers.txt"), split = TRUE)
+  make_tables(opt$out, file.path(opt$out, "tables"), opt$data_dir)
+  sink()
 }
 
 if (sys.nframe() == 0L) main()
